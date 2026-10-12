@@ -1,0 +1,43 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: shadowvault-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: shadowvault
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shadowvault-app
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/shadowvault?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      DB_USER: root
+      DB_PASS: rootpassword
+      JWT_SECRET: 4f7b2c9e8d1a5f0e3c6a9b2d5f8e1c4b7a0d3f6e9c2b5a8d1e4f7a0c3b6e9d28
+      DATA_DIR: /app/data
+      SPRING_PROFILES_ACTIVE: dev
+    volumes:
+      - app_data:/app/data
+
+volumes:
+  mysql_data:
+  app_data:

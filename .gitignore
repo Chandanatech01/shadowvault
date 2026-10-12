@@ -1,0 +1,38 @@
+# Local environment variables containing secrets
+.env
+*.env
+.env.local
+.env.*.local
+
+# Build directories
+target/
+**/target/
+dist/
+**/dist/
+node_modules/
+**/node_modules/
+
+# Runtime data & H2 legacy files
+data/
+**/data/
+scratch/
+**/scratch/
+*.mv.db
+*.trace.db
+
+# IDE & OS files
+.idea/
+*.iml
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+**/logs/
