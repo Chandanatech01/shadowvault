@@ -6,12 +6,14 @@ import 'react-toastify/dist/ReactToastify.css';
 import './index.css';
 
 // Clear localStorage and sessionStorage on startup of a fresh session, so no old login survives
-if (!sessionStorage.getItem('sv_session_active')) {
-  try {
+try {
+  if (!sessionStorage.getItem('sv_session_active')) {
     localStorage.clear();
     sessionStorage.clear();
     sessionStorage.setItem('sv_session_active', '1');
-  } catch {}
+  }
+} catch (e) {
+  // Ignored if storage access is restricted in strict incognito / iframe
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

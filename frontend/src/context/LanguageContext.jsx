@@ -514,11 +514,19 @@ export const speechLangCodes = {
 };
 
 export const LanguageProvider = ({ children }) => {
-  const [lang, setLang] = useState(() => localStorage.getItem("sv-lang") || "en");
+  const [lang, setLang] = useState(() => {
+    try {
+      return localStorage.getItem("sv-lang") || "en";
+    } catch {
+      return "en";
+    }
+  });
 
   const changeLang = (code) => {
     setLang(code);
-    localStorage.setItem("sv-lang", code);
+    try {
+      localStorage.setItem("sv-lang", code);
+    } catch {}
   };
 
   const t = (key) => translations[lang]?.[key] || translations.en[key] || key;

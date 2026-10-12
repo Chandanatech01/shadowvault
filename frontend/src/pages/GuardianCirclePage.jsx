@@ -11,7 +11,13 @@ const DEFAULT_THRESHOLD = 3;
 export default function GuardianCirclePage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
-  const [token] = useState(() => localStorage.getItem("sv-token") || null);
+  const [token] = useState(() => {
+    try {
+      return localStorage.getItem("sv-token") || null;
+    } catch {
+      return null;
+    }
+  });
   const [guardians, setGuardians] = useState([]);
   const [label, setLabel] = useState("");
   const [contact, setContact] = useState("");
