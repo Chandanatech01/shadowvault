@@ -19,7 +19,7 @@ export default function EvidencePage() {
   const [submissionResult, setSubmissionResult] = useState(null);
 
   // Evidence Form state
-  const [evidenceType, setEvidenceType] = useState("IMAGE"); // 'TEXT', 'IMAGE', 'AUDIO'
+  const [evidenceType, setEvidenceType] = useState("TEXT"); // 'TEXT', 'IMAGE', 'AUDIO'
   const [description, setDescription] = useState("");
   const [textContent, setTextContent] = useState("");
   const [selectedTags, setSelectedTags] = useState({
@@ -86,13 +86,15 @@ export default function EvidencePage() {
       return;
     }
 
-    if (evidenceType === "TEXT" && !textContent.trim() && !description.trim()) {
+    const effectiveType = uploadedFile ? evidenceType : (evidenceType === "IMAGE" || evidenceType === "AUDIO" ? "TEXT" : evidenceType);
+
+    if (effectiveType === "TEXT" && !textContent.trim() && !description.trim()) {
       setError("Please provide a statement or incident description.");
       return;
     }
 
-    if ((evidenceType === "IMAGE" || evidenceType === "AUDIO") && !uploadedFile && !textContent.trim()) {
-      setError(`Please upload a ${evidenceType.toLowerCase()} file (max 200 KB).`);
+    if ((effectiveType === "IMAGE" || effectiveType === "AUDIO") && !uploadedFile && !textContent.trim()) {
+      setError(`Please upload a ${effectiveType.toLowerCase()} file (max 200 KB).`);
       return;
     }
 
@@ -101,7 +103,7 @@ export default function EvidencePage() {
 
     try {
       const formData = new FormData();
-      formData.append("type", evidenceType);
+      formData.append("type", effectiveType);
       formData.append("description", description);
 
       const activeTags = Object.keys(selectedTags).filter((k) => selectedTags[k]);
