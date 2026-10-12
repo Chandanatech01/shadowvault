@@ -8,7 +8,7 @@ FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
 RUN addgroup -S shadowgroup && adduser -S shadowuser -G shadowgroup
-RUN mkdir -p /app/data && chown -R shadowuser:shadowgroup /app
+RUN mkdir -p /app/data && chmod -R 777 /app/data && chown -R shadowuser:shadowgroup /app
 
 COPY --from=builder /app/backend/target/shadowvault-backend-1.0.0.jar /app/shadowvault.jar
 RUN chown shadowuser:shadowgroup /app/shadowvault.jar
