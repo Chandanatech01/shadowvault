@@ -16,4 +16,4 @@ RUN chown shadowuser:shadowgroup /app/shadowvault.jar
 USER shadowuser
 EXPOSE 8080
 
-ENTRYPOINT ["sh", "-c", "java -Dserver.port=${PORT:-8080} -jar /app/shadowvault.jar"]
+ENTRYPOINT ["sh", "-c", "java -Xmx380m -Dserver.port=${PORT:-8080} -jar /app/shadowvault.jar"]
