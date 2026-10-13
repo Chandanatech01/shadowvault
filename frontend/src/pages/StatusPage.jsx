@@ -6,6 +6,68 @@ import LanguageSwitcher from "../components/LanguageSwitcher";
 import { useAuth } from "../context/AuthContext";
 import { API_BASE } from "../config";
 
+function StegoThumbnail({ itemId, token }) {
+  const [imgSrc, setImgSrc] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = null;
+    const fetchBlob = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/cases/evidence/${itemId}/stego`, {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: "blob",
+        });
+        if (active) {
+          objectUrl = URL.createObjectURL(res.data);
+          setImgSrc(objectUrl);
+        }
+      } catch (err) {
+        // Fallback or ignore
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    fetchBlob();
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [itemId, token]);
+
+  if (loading) {
+    return (
+      <div style={{ width: "90px", height: "90px", borderRadius: "8px", backgroundColor: "#1e1e2e", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", color: "#6b6b80" }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!imgSrc) {
+    return (
+      <div style={{ width: "90px", height: "90px", borderRadius: "8px", backgroundColor: "#161622", border: "1px dashed #3a3a4c", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>
+        🖼️
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imgSrc}
+      alt="Stego carrier preview"
+      style={{
+        width: "90px",
+        height: "90px",
+        objectFit: "cover",
+        borderRadius: "8px",
+        border: "1px solid #7c3aed44",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.4)"
+      }}
+    />
+  );
+}
+
 export default function StatusPage() {
   const navigate = useNavigate();
   const { token, isAuthenticated } = useAuth();
@@ -15,6 +77,16 @@ export default function StatusPage() {
   const [unavailable, setUnavailable] = useState(false);
   const [actionMsg, setActionMsg] = useState("");
   const [tamperLoading, setTamperLoading] = useState(false);
+
+  // Stego proof visibility per item
+  const [showProofMap, setShowProofMap] = useState({});
+
+  // Decrypt modal state
+  const [decryptModalItem, setDecryptModalItem] = useState(null);
+  const [decryptPassword, setDecryptPassword] = useState("");
+  const [decryptLoading, setDecryptLoading] = useState(false);
+  const [decryptError, setDecryptError] = useState("");
+  const [decryptResult, setDecryptResult] = useState(null);
 
   useEffect(() => {
     if (!token) {
@@ -81,6 +153,65 @@ export default function StatusPage() {
     }
   };
 
+  const handleDownloadStego = async (item) => {
+    try {
+      const res = await axios.get(`${API_BASE}/cases/evidence/${item.id}/stego`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: "blob",
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "image/png" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `photo_${item.id}.png`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Failed to download stego image: " + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const handleOpenDecryptModal = (item) => {
+    setDecryptModalItem(item);
+    setDecryptPassword("");
+    setDecryptError("");
+    setDecryptResult(null);
+  };
+
+  const handleCloseDecryptModal = () => {
+    setDecryptModalItem(null);
+    setDecryptPassword("");
+    setDecryptError("");
+    setDecryptResult(null);
+  };
+
+  const handleDecryptSubmit = async (e) => {
+    e.preventDefault();
+    if (!decryptPassword) {
+      setDecryptError("Please enter your login password");
+      return;
+    }
+    setDecryptLoading(true);
+    setDecryptError("");
+    try {
+      const res = await axios.post(
+        `${API_BASE}/cases/evidence/${decryptModalItem.id}/decrypt`,
+        { password: decryptPassword },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setDecryptResult(res.data);
+    } catch (err) {
+      setDecryptError(err.response?.data?.error || "Decryption failed. Please check your password.");
+    } finally {
+      setDecryptLoading(false);
+    }
+  };
+
+  const toggleStegoProof = (id) => {
+    setShowProofMap((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const getSeverityBadgeColor = (level) => {
     switch (level) {
       case "LOW": return "#10b981";
@@ -116,6 +247,10 @@ export default function StatusPage() {
     monoHash: { fontFamily: "monospace", fontSize: "12px", color: "#06b6d4", wordBreak: "break-all" },
     tagPill: { display: "inline-block", padding: "3px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: 600, backgroundColor: "rgba(124,58,237,0.15)", color: "#c084fc", marginRight: "6px", marginBottom: "4px" },
     alertBanner: { padding: "12px 16px", borderRadius: "10px", backgroundColor: "rgba(124,58,237,0.2)", border: "1px solid #7c3aed", color: "#e8e8f0", fontSize: "13px", marginBottom: "20px" },
+    btnSmall: { padding: "8px 14px", borderRadius: "8px", fontSize: "12px", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", transition: "all 0.15s ease", border: "none" },
+    proofPanel: { marginTop: "14px", padding: "16px", borderRadius: "10px", backgroundColor: "#0c0c14", border: "1px solid #2d2248" },
+    modalOverlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" },
+    modalCard: { backgroundColor: "#141420", border: "1px solid #7c3aed66", borderRadius: "16px", maxWidth: "540px", width: "100%", padding: "28px", boxSizing: "border-box", boxShadow: "0 10px 30px rgba(0,0,0,0.6)" },
   };
 
   if (loading) {
@@ -148,84 +283,93 @@ export default function StatusPage() {
             <div>
               <div style={{ fontSize: "12px", color: "#6b6b80", fontFamily: "monospace", marginBottom: "4px" }}>CASE IDENTIFIER</div>
               <div style={s.caseId}>{caseData?.caseId || "N/A"}</div>
-              <div style={{ fontSize: "13px", color: "#8b949e", marginTop: "4px" }}>
-                Created: {caseData?.createdAt ? new Date(caseData.createdAt).toLocaleString() : "Just now"}
-              </div>
             </div>
 
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: "12px", color: "#6b6b80", fontFamily: "monospace", marginBottom: "4px" }}>DYNAMIC SEVERITY</div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", justifyContent: "flex-end" }}>
-                <span style={s.statusBadge(getSeverityBadgeColor(caseData?.severityLevel))}>
-                  ● {caseData?.severityLevel || "LOW"} ({caseData?.severityScore || 0} pts)
-                </span>
-              </div>
-              <div style={{ fontSize: "11px", color: "#6b6b80", marginTop: "4px", fontFamily: "monospace" }}>
-                Formula: Tags + 5 per evidence
-              </div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <span style={s.statusBadge(getSeverityBadgeColor(caseData?.severityLevel))}>
+                {caseData?.severityLevel || "STANDARD"} PRIORITY
+              </span>
+              <span style={{ fontSize: "12px", fontFamily: "monospace", color: "#8b949e", border: "1px solid #2a2a3a", padding: "4px 10px", borderRadius: "14px" }}>
+                Score: {caseData?.severityScore || 0}
+              </span>
             </div>
           </div>
 
-          <div style={{ borderTop: "1px solid #1e1e2e", paddingTop: "16px" }}>
-            <div style={s.controlsRow}>
-              <button
-                style={s.toggleBtn(unavailable)}
-                onClick={handleToggleUnavailable}
-                title="If marked unavailable, authority access requests can be approved by your designated guardian"
-              >
-                <span>{unavailable ? "🔴 Unavailable" : "🟢 Available"}</span>
-                <span style={{ fontSize: "11px", color: "#8b949e" }}>
-                  ({unavailable ? "Escalates to Guardian" : "You review requests"})
-                </span>
-              </button>
-
-              <button
-                style={s.tamperBtn}
-                onClick={handleSimulateTamper}
-                disabled={tamperLoading || !caseData?.timeline?.length}
-                title="Corrupts the latest evidence item to test tamper detection"
-              >
-                ⚡ Simulate Tampering (Demo)
-              </button>
-
-              <button
-                style={s.addBtn}
-                onClick={() => navigate("/evidence")}
-              >
-                + Add Evidence
-              </button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+            <div style={{ fontSize: "13px", color: "#8b949e" }}>
+              Access Permission:{" "}
+              <strong style={{ color: caseData?.accessGranted ? "#10b981" : "#f59e0b" }}>
+                {caseData?.accessGranted ? "GRANTED (DECRYPTABLE)" : "RESTRICTED (MASKED)"}
+              </strong>
             </div>
+
+            <div style={{ fontSize: "13px", color: "#8b949e" }}>
+              Victim Presence:{" "}
+              <strong style={{ color: unavailable ? "#ef4444" : "#10b981" }}>
+                {unavailable ? "UNAVAILABLE (GUARDIAN ESCALATION ACTIVE)" : "AVAILABLE (DIRECT CONSENT)"}
+              </strong>
+            </div>
+          </div>
+
+          <div style={s.controlsRow}>
+            <button
+              onClick={handleToggleUnavailable}
+              style={s.toggleBtn(unavailable)}
+            >
+              {unavailable ? "🔴 Mark Self AVAILABLE" : "🛡️ Mark Self UNAVAILABLE"}
+            </button>
+
+            <button
+              onClick={handleSimulateTamper}
+              style={s.tamperBtn}
+              disabled={tamperLoading || !caseData?.timeline?.length}
+            >
+              {tamperLoading ? "Corrupting..." : "🧪 Simulate Hash Chain Tampering"}
+            </button>
+
+            <button
+              onClick={() => navigate("/victim")}
+              style={s.addBtn}
+            >
+              + Add Evidence
+            </button>
           </div>
         </div>
 
-        {/* PENDING ACCESS REQUESTS SECTION */}
-        {caseData?.requests && caseData.requests.filter(r => r.status === "PENDING").length > 0 && (
+        {/* PENDING ACCESS REQUESTS */}
+        {caseData?.requests && caseData.requests.length > 0 && (
           <div style={{ marginBottom: "32px" }}>
-            <div style={s.sectionLabel}>⚖️ Pending Authority Access Requests</div>
-            {caseData.requests.filter(r => r.status === "PENDING").map(req => (
+            <div style={s.sectionLabel}>⚠️ Official Investigation Access Requests</div>
+            {caseData.requests.map((req) => (
               <div key={req.id} style={s.requestCard}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <div style={{ fontSize: "14px", fontWeight: "700", color: "#e8e8f0" }}>
-                    Investigation Request from: <span style={{ color: "#c084fc" }}>{req.requesterUsername}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+                  <div>
+                    <span style={{ fontSize: "14px", fontWeight: 600 }}>Requester: {req.requesterUsername}</span>
+                    <span style={{ fontSize: "12px", color: "#8b949e", marginLeft: "12px" }}>
+                      Status: <strong style={{ color: req.status === "APPROVED" ? "#10b981" : req.status === "REJECTED" ? "#ef4444" : "#f59e0b" }}>{req.status}</strong>
+                    </span>
                   </div>
-                  <span style={{ fontSize: "11px", color: "#f59e0b", fontFamily: "monospace", border: "1px solid #f59e0b44", padding: "2px 8px", borderRadius: "10px" }}>
-                    PENDING APPROVAL
+                  <span style={{ fontSize: "11px", color: "#6b6b80", fontFamily: "monospace" }}>
+                    {new Date(req.createdAt).toLocaleString()}
                   </span>
                 </div>
-                <div style={{ fontSize: "13px", color: "#8b949e", lineHeight: "1.5" }}>
-                  Reason: {req.reason || "Official case review"}
-                </div>
-                <div style={{ fontSize: "12px", color: "#6b6b80", marginTop: "4px", fontFamily: "monospace" }}>
-                  Requested: {new Date(req.createdAt).toLocaleString()}
-                </div>
-                <div style={s.actionRow}>
-                  <button style={s.approveBtn} onClick={() => handleRespondRequest(req.id, true)}>
-                    ✓ Approve Access
-                  </button>
-                  <button style={s.rejectBtn} onClick={() => handleRespondRequest(req.id, false)}>
-                    ✕ Reject
-                  </button>
-                </div>
+
+                {req.reason && (
+                  <p style={{ fontSize: "13px", color: "#a5b4fc", margin: "6px 0 12px", lineHeight: "1.4" }}>
+                    Reason: "{req.reason}"
+                  </p>
+                )}
+
+                {req.status === "PENDING" && (
+                  <div style={s.actionRow}>
+                    <button onClick={() => handleRespondRequest(req.id, true)} style={s.approveBtn}>
+                      ✓ Grant Consent (Approve Access)
+                    </button>
+                    <button onClick={() => handleRespondRequest(req.id, false)} style={s.rejectBtn}>
+                      ✕ Reject Access
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -268,7 +412,7 @@ export default function StatusPage() {
 
                   {/* SEVERITY TAGS */}
                   <div style={{ marginBottom: "12px" }}>
-                    {item.severityTags && item.severityTags.map(tag => (
+                    {item.severityTags && item.severityTags.map((tag) => (
                       <span key={tag} style={s.tagPill}>
                         🏷️ {tag}
                       </span>
@@ -297,12 +441,202 @@ export default function StatusPage() {
                       </span>
                     </div>
                   </div>
+
+                  {/* STEGO ACTION BUTTONS */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "14px" }}>
+                    <button
+                      onClick={() => handleDownloadStego(item)}
+                      style={{ ...s.btnSmall, backgroundColor: "#1e1e2e", color: "#e8e8f0", border: "1px solid #2a2a3a" }}
+                    >
+                      📥 Download hidden image
+                    </button>
+                    <button
+                      onClick={() => handleOpenDecryptModal(item)}
+                      style={{ ...s.btnSmall, backgroundColor: "#7c3aed", color: "#ffffff" }}
+                    >
+                      🔓 Decrypt and view
+                    </button>
+                    <button
+                      onClick={() => toggleStegoProof(item.id)}
+                      style={{
+                        ...s.btnSmall,
+                        backgroundColor: showProofMap[item.id] ? "rgba(124,58,237,0.25)" : "#161622",
+                        color: "#a78bfa",
+                        border: "1px solid #7c3aed44",
+                      }}
+                    >
+                      🛡️ {showProofMap[item.id] ? "Hide Stego Proof" : "Stego Proof"}
+                    </button>
+                  </div>
+
+                  {/* STEGO PROOF PANEL */}
+                  {showProofMap[item.id] && (
+                    <div style={s.proofPanel}>
+                      <div style={{ fontWeight: 700, fontSize: "12px", color: "#a78bfa", marginBottom: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>🛡️ Stego Proof Verification</span>
+                        <span style={{ color: "#10b981", fontSize: "11px", fontFamily: "monospace" }}>● Hidden with key-seeded adaptive LSB</span>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "16px", alignItems: "flex-start", flexWrap: "wrap" }}>
+                        <StegoThumbnail itemId={item.id} token={token} />
+
+                        <div style={{ flex: 1, minWidth: "220px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                          <div>
+                            <span style={{ color: "#8b949e" }}>Stego Carrier File: </span>
+                            <span style={{ color: "#06b6d4", fontFamily: "monospace" }}>photo_{item.id}.png</span>
+                          </div>
+                          <div>
+                            <span style={{ color: "#8b949e" }}>Payload Size: </span>
+                            <span style={{ color: "#e8e8f0", fontFamily: "monospace", fontWeight: 600 }}>
+                              {item.payloadSizeBytes ? `${item.payloadSizeBytes} bytes` : "Stored as LONGBLOB in MySQL"}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ color: "#8b949e" }}>Pixels / Channel Values Modified: </span>
+                            <span style={{ color: "#e8e8f0", fontFamily: "monospace", fontWeight: 600 }}>
+                              {item.modifiedSlots ? `${item.modifiedSlots} channels` : "Key-seeded adaptive slots"}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ color: "#8b949e" }}>Carrier Image Dimensions: </span>
+                            <span style={{ color: "#e8e8f0", fontFamily: "monospace", fontWeight: 600 }}>
+                              {item.imageWidth && item.imageHeight ? `${item.imageWidth} × ${item.imageHeight} px` : "250 × 250 px"}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ color: "#8b949e" }}>Embedding Engine: </span>
+                            <span style={{ color: "#10b981", fontWeight: 600 }}>
+                              {item.stegoAlgorithm || "Hidden with key-seeded adaptive LSB"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* PASSWORD DECRYPT MODAL */}
+      {decryptModalItem && (
+        <div style={s.modalOverlay}>
+          <div style={s.modalCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ fontSize: "16px", fontWeight: 700, color: "#c084fc" }}>
+                🔓 Decrypt Evidence #{decryptModalItem.sequenceNumber}
+              </div>
+              <button
+                onClick={handleCloseDecryptModal}
+                style={{ background: "none", border: "none", color: "#8b949e", fontSize: "18px", cursor: "pointer" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {!decryptResult ? (
+              <form onSubmit={handleDecryptSubmit}>
+                <p style={{ fontSize: "13px", color: "#8b949e", marginBottom: "16px", lineHeight: "1.5" }}>
+                  Enter your login password to extract the envelope from the stego carrier, unwrap the item key, and decrypt your evidence.
+                </p>
+
+                {decryptError && (
+                  <div style={{ padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.15)", border: "1px solid #ef4444", color: "#fca5a5", fontSize: "12px", marginBottom: "16px" }}>
+                    {decryptError}
+                  </div>
+                )}
+
+                <div style={{ marginBottom: "20px" }}>
+                  <label style={{ display: "block", fontSize: "11px", fontFamily: "monospace", color: "#8b949e", marginBottom: "6px" }}>
+                    YOUR LOGIN PASSWORD
+                  </label>
+                  <input
+                    type="password"
+                    value={decryptPassword}
+                    onChange={(e) => setDecryptPassword(e.target.value)}
+                    placeholder="Enter login password"
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "12px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid #2a2a3a",
+                      backgroundColor: "#0d0d14",
+                      color: "#fff",
+                      fontSize: "14px",
+                      boxSizing: "border-box"
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={handleCloseDecryptModal}
+                    style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #2a2a3a", backgroundColor: "#161622", color: "#8b949e", fontSize: "13px", cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={decryptLoading}
+                    style={{ padding: "10px 20px", borderRadius: "8px", border: "none", backgroundColor: "#7c3aed", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    {decryptLoading ? "Decrypting..." : "Decrypt & Verify"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(16,185,129,0.15)", border: "1px solid #10b981", color: "#10b981", fontSize: "13px", fontWeight: 600, marginBottom: "16px" }}>
+                  <span>✓</span> Integrity Hash Verified (Unbroken Authenticity)
+                </div>
+
+                <div style={{ fontSize: "12px", color: "#8b949e", marginBottom: "12px" }}>
+                  Payload Type: <strong style={{ color: "#e8e8f0" }}>{decryptResult.evidenceType}</strong> ({decryptResult.originalFileName || "statement.txt"})
+                </div>
+
+                {decryptResult.evidenceType === "TEXT" && (
+                  <div style={{ padding: "14px", borderRadius: "8px", backgroundColor: "#0a0a0f", border: "1px solid #1e1e2e", color: "#e8e8f0", fontSize: "13px", fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: "250px", overflowY: "auto", marginBottom: "16px" }}>
+                    {decryptResult.textData}
+                  </div>
+                )}
+
+                {decryptResult.evidenceType === "IMAGE" && (
+                  <div style={{ textAlign: "center", marginBottom: "16px" }}>
+                    <img
+                      src={decryptResult.previewUrl}
+                      alt="Decrypted evidence preview"
+                      style={{ maxWidth: "100%", maxHeight: "280px", borderRadius: "8px", border: "1px solid #1e1e2e" }}
+                    />
+                  </div>
+                )}
+
+                {decryptResult.evidenceType === "AUDIO" && (
+                  <div style={{ textAlign: "center", marginBottom: "16px" }}>
+                    <audio controls src={decryptResult.previewUrl} style={{ width: "100%" }} />
+                  </div>
+                )}
+
+                <div style={{ fontSize: "11px", color: "#6b6b80", fontFamily: "monospace", wordBreak: "break-all", marginBottom: "16px" }}>
+                  SHA-256: {decryptResult.contentHash}
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    onClick={handleCloseDecryptModal}
+                    style={{ padding: "8px 18px", borderRadius: "8px", border: "none", backgroundColor: "#7c3aed", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

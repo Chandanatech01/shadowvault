@@ -68,6 +68,8 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers("/api/authority/**").hasRole("AUTHORITY")
                         .requestMatchers("/api/guardian/**").hasRole("GUARDIAN")
+                        .requestMatchers("/api/cases/evidence/*/stego").authenticated()
+                        .requestMatchers("/api/cases/evidence/*/decrypt").authenticated()
                         .requestMatchers("/api/cases/**").hasRole("VICTIM")
                         .requestMatchers("/api/auth/toggle-availability").hasRole("VICTIM")
                         .requestMatchers("/api/auth/me").authenticated()

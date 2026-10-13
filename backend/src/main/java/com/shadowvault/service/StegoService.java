@@ -32,10 +32,27 @@ public class StegoService {
         return outputFile;
     }
 
+    public byte[] embedToBytes(byte[] payload, byte[] keyMaterial) throws IOException {
+        BufferedImage carrier = createCarrierImage(payload.length);
+        embedPayload(carrier, payload, keyMaterial);
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        ImageIO.write(carrier, "PNG", baos);
+        return baos.toByteArray();
+    }
+
     public byte[] extractPayloadFromFile(File stegoFile, byte[] keyMaterial) throws IOException {
         BufferedImage image = ImageIO.read(stegoFile);
         if (image == null) {
             throw new IOException("Failed to read stego PNG image from: " + stegoFile.getAbsolutePath());
+        }
+        return extractPayload(image, keyMaterial);
+    }
+
+    public byte[] extractPayloadFromBytes(byte[] pngBytes, byte[] keyMaterial) throws IOException {
+        java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(pngBytes);
+        BufferedImage image = ImageIO.read(bais);
+        if (image == null) {
+            throw new IOException("Failed to read stego PNG image from byte array");
         }
         return extractPayload(image, keyMaterial);
     }

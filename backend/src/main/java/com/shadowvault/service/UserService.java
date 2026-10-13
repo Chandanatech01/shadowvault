@@ -26,6 +26,9 @@ public class UserService {
     @org.springframework.beans.factory.annotation.Value("${shadowvault.authority.access-code:AUTH-2026}")
     private String authorityAccessCode;
 
+    @org.springframework.beans.factory.annotation.Value("${shadowvault.demo.seed:false}")
+    private boolean demoSeed;
+
     public UserService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
                        EncryptionService encryptionService,
@@ -38,6 +41,9 @@ public class UserService {
 
     @PostConstruct
     public void seedDemoUsers() {
+        if (!demoSeed) {
+            return;
+        }
         // Idempotently seed or update victim1
         userRepository.findByUsername("victim1").ifPresentOrElse(victim -> {
             victim.setPassword(passwordEncoder.encode("demo123"));

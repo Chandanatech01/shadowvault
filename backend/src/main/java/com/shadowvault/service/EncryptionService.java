@@ -10,6 +10,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
@@ -126,6 +127,39 @@ public class EncryptionService {
         } catch (Exception e) {
             return base64Encrypted; // Return as-is if not encrypted
         }
+    }
+
+    public byte[] deriveKeyFromSecret(String secret) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return md.digest(secret.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw new RuntimeException("SHA-256 derivation failed", e);
+        }
+    }
+
+    public byte[] encryptWithMasterSecret(byte[] data, String masterSecret) {
+        byte[] keyBytes = deriveKeyFromSecret(masterSecret);
+        SecretKey masterKey = new SecretKeySpec(keyBytes, "AES");
+        byte[] iv = generateIv();
+        byte[] ciphertext = encryptAesGcm(masterKey, iv, data);
+        ByteBuffer buffer = ByteBuffer.allocate(iv.length + ciphertext.length);
+        buffer.put(iv);
+        buffer.put(ciphertext);
+        return buffer.array();
+    }
+
+    public byte[] decryptWithMasterSecret(byte[] encryptedData, String masterSecret) {
+        byte[] keyBytes = deriveKeyFromSecret(masterSecret);
+        SecretKey masterKey = new SecretKeySpec(keyBytes, "AES");
+        if (encryptedData.length < IV_LENGTH) {
+            throw new IllegalArgumentException("Encrypted data too short");
+        }
+        byte[] iv = new byte[IV_LENGTH];
+        byte[] ciphertext = new byte[encryptedData.length - IV_LENGTH];
+        System.arraycopy(encryptedData, 0, iv, 0, IV_LENGTH);
+        System.arraycopy(encryptedData, IV_LENGTH, ciphertext, 0, ciphertext.length);
+        return decryptAesGcm(masterKey, iv, ciphertext);
     }
 
     public byte[] packPayload(byte[] wrappedKey, byte[] iv, byte[] ciphertext) {

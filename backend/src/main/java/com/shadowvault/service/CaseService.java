@@ -4,10 +4,15 @@ import com.shadowvault.config.RsaKeyManager;
 import com.shadowvault.model.*;
 import com.shadowvault.repository.CaseRepository;
 import com.shadowvault.repository.EvidenceItemRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
@@ -29,6 +34,9 @@ public class CaseService {
     private final SeverityService severityService;
     private final RsaKeyManager rsaKeyManager;
     private final SecureRandom secureRandom = new SecureRandom();
+
+    @Value("${shadowvault.master.key-secret:master-fallback-secret-2026-shadowvault-secure-test-key-32b}")
+    private String masterKeySecret;
 
     public CaseService(CaseRepository caseRepository,
                        EvidenceItemRepository evidenceItemRepository,
@@ -84,10 +92,17 @@ public class CaseService {
             PublicKey authorityPubKey = rsaKeyManager.getAuthorityPublicKey();
             byte[] wrappedKey = encryptionService.wrapAesKey(aesKey, authorityPubKey);
 
+            // Store a second wrap of each item's AES key under KEY_ENCRYPTION_SECRET for victim decrypt
+            byte[] masterWrappedKey = encryptionService.encryptWithMasterSecret(aesKey.getEncoded(), masterKeySecret);
+
             // (c) Hide encrypted payload with length header inside auto-generated PNG carrier using key-seeded adaptive LSB
             byte[] packedPayload = encryptionService.packPayload(wrappedKey, iv, ciphertext);
-            String filePrefix = "stego_" + caseRecord.getCaseId() + "_" + System.currentTimeMillis();
-            File stegoPngFile = stegoService.embedAndSave(packedPayload, wrappedKey, filePrefix);
+            BufferedImage carrier = stegoService.createCarrierImage(packedPayload.length);
+            stegoService.embedPayload(carrier, packedPayload, wrappedKey);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(carrier, "PNG", baos);
+            byte[] stegoPngBytes = baos.toByteArray();
 
             // (d) contentHash = SHA-256; chainHash = SHA256(contentHash + prevChainHash + timestamp + caseId + victimId)
             String contentHash = hashChainService.computeContentHash(rawBytes);
@@ -116,13 +131,30 @@ public class CaseService {
             item.setTagScore(tagScore);
             item.setOriginalFileName(originalFileName);
             item.setMimeType(mimeType);
-            item.setStegoImagePath(stegoPngFile.getAbsolutePath());
+
+            // Persist as LONGBLOB in MySQL
+            item.setStegoImageData(stegoPngBytes);
+            item.setMasterWrappedAesKey(Base64.getEncoder().encodeToString(masterWrappedKey));
+            item.setPayloadSizeBytes(packedPayload.length);
+            item.setModifiedSlots((packedPayload.length + 4) * 8);
+            item.setImageWidth(carrier.getWidth());
+            item.setImageHeight(carrier.getHeight());
+            item.setStegoAlgorithm("Hidden with key-seeded adaptive LSB");
+            item.setStegoImagePath("db://stego/" + caseRecord.getCaseId() + "_" + System.currentTimeMillis() + ".png");
+
             item.setWrappedAesKey(Base64.getEncoder().encodeToString(wrappedKey));
             item.setIv(Base64.getEncoder().encodeToString(iv));
             item.setContentHash(contentHash);
             item.setPrevChainHash(prevChainHash);
             item.setChainHash(chainHash);
             item.setCreatedAt(timestamp);
+
+            // Optional disk backup
+            try {
+                String filePrefix = "stego_" + caseRecord.getCaseId() + "_" + System.currentTimeMillis();
+                File stegoPngFile = stegoService.embedAndSave(packedPayload, wrappedKey, filePrefix);
+                item.setStegoImagePath(stegoPngFile.getAbsolutePath());
+            } catch (Exception ignored) {}
 
             evidenceItemRepository.save(item);
 
@@ -161,11 +193,67 @@ public class CaseService {
                     contentPrefix,
                     chainPrefix,
                     prevPrefix,
-                    "CHAIN_LINKED"
+                    "CHAIN_LINKED",
+                    item.getPayloadSizeBytes(),
+                    item.getModifiedSlots(),
+                    item.getImageWidth(),
+                    item.getImageHeight(),
+                    item.getStegoAlgorithm() != null ? item.getStegoAlgorithm() : "Hidden with key-seeded adaptive LSB"
             ));
         }
 
         return timeline;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> decryptEvidenceForVictim(EvidenceItem item) {
+        try {
+            byte[] wrappedKeyBytes = Base64.getDecoder().decode(item.getWrappedAesKey());
+            byte[] extractedPackedPayload;
+
+            if (item.getStegoImageData() != null && item.getStegoImageData().length > 0) {
+                extractedPackedPayload = stegoService.extractPayloadFromBytes(item.getStegoImageData(), wrappedKeyBytes);
+            } else {
+                File stegoFile = new File(item.getStegoImagePath());
+                extractedPackedPayload = stegoService.extractPayloadFromFile(stegoFile, wrappedKeyBytes);
+            }
+
+            EncryptionService.EncryptedContainer container = encryptionService.unpackPayload(extractedPackedPayload);
+
+            if (item.getMasterWrappedAesKey() == null) {
+                throw new IllegalStateException("Master-wrapped AES key not available for evidence item " + item.getId());
+            }
+
+            byte[] masterWrappedKeyBytes = Base64.getDecoder().decode(item.getMasterWrappedAesKey());
+            byte[] rawAesKeyBytes = encryptionService.decryptWithMasterSecret(masterWrappedKeyBytes, masterKeySecret);
+            SecretKey aesKey = new SecretKeySpec(rawAesKeyBytes, "AES");
+
+            byte[] decryptedData = encryptionService.decryptAesGcm(aesKey, container.iv, container.ciphertext);
+
+            String recomputedContentHash = hashChainService.computeContentHash(decryptedData);
+            boolean verified = recomputedContentHash.equalsIgnoreCase(item.getContentHash());
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("evidenceId", item.getId());
+            result.put("evidenceType", item.getEvidenceType());
+            result.put("originalFileName", item.getOriginalFileName());
+            result.put("mimeType", item.getMimeType());
+            result.put("verified", verified);
+            result.put("contentHash", item.getContentHash());
+            result.put("recomputedHash", recomputedContentHash);
+
+            if ("TEXT".equalsIgnoreCase(item.getEvidenceType())) {
+                result.put("textData", new String(decryptedData, StandardCharsets.UTF_8));
+            } else {
+                String b64 = Base64.getEncoder().encodeToString(decryptedData);
+                String mime = item.getMimeType() != null ? item.getMimeType() : ("IMAGE".equalsIgnoreCase(item.getEvidenceType()) ? "image/png" : "audio/wav");
+                result.put("previewUrl", "data:" + mime + ";base64," + b64);
+                result.put("base64Data", b64);
+            }
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException("Decryption failed: " + e.getMessage(), e);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -193,11 +281,16 @@ public class CaseService {
             String textPreview = null;
 
             try {
-                // 1. Extract stego payload from file
-                File stegoFile = new File(item.getStegoImagePath());
+                // 1. Extract stego payload from LONGBLOB (or file fallback)
                 byte[] wrappedKeyBytes = Base64.getDecoder().decode(item.getWrappedAesKey());
+                byte[] extractedPackedPayload;
+                if (item.getStegoImageData() != null && item.getStegoImageData().length > 0) {
+                    extractedPackedPayload = stegoService.extractPayloadFromBytes(item.getStegoImageData(), wrappedKeyBytes);
+                } else {
+                    File stegoFile = new File(item.getStegoImagePath());
+                    extractedPackedPayload = stegoService.extractPayloadFromFile(stegoFile, wrappedKeyBytes);
+                }
 
-                byte[] extractedPackedPayload = stegoService.extractPayloadFromFile(stegoFile, wrappedKeyBytes);
                 EncryptionService.EncryptedContainer container = encryptionService.unpackPayload(extractedPackedPayload);
 
                 // 2. Unwrap AES key with RSA-4096 private key
@@ -238,12 +331,13 @@ public class CaseService {
                 if ("TEXT".equalsIgnoreCase(item.getEvidenceType()) && decryptedData != null) {
                     textPreview = new String(decryptedData, StandardCharsets.UTF_8);
                 } else if (decryptedData != null) {
-                    textPreview = "[" + item.getEvidenceType() + " payload: " + decryptedData.length + " bytes]";
+                    textPreview = "[Binary " + item.getEvidenceType() + " payload: " + decryptedData.length + " bytes]";
                 }
+
             } catch (Exception e) {
                 itemVerified = false;
                 status = "TAMPERED";
-                failureReason = "Decryption/Stego extraction failed: " + e.getMessage();
+                failureReason = "Stego extraction or cryptographic decryption failed: " + e.getMessage();
             }
 
             if (!itemVerified && wholeChainValid) {
@@ -251,6 +345,8 @@ public class CaseService {
                 firstBrokenIndex = i;
                 firstBrokenId = item.getId();
             }
+
+            expectedPrevChain = item.getChainHash();
 
             decryptedItems.add(new DecryptedEvidenceDto(
                     item.getId(),
@@ -271,16 +367,10 @@ public class CaseService {
                     textPreview,
                     decryptedData != null ? Base64.getEncoder().encodeToString(decryptedData) : null
             ));
-
-            expectedPrevChain = item.getChainHash();
         }
 
-        // Decrypt victim identity ONLY now
         User victim = caseRecord.getVictim();
-        String decryptedVictimName = encryptionService.decryptIdentity(victim.getEncryptedName());
-        String decryptedVictimPhone = encryptionService.decryptIdentity(victim.getEncryptedPhone());
-        String decryptedGuardianName = encryptionService.decryptIdentity(victim.getGuardianName());
-        String decryptedGuardianPhone = encryptionService.decryptIdentity(victim.getGuardianPhone());
+        String overallIntegrity = wholeChainValid ? "VERIFIED" : "TAMPERED";
 
         return new DecryptedCaseReport(
                 caseRecord.getId(),
@@ -290,12 +380,12 @@ public class CaseService {
                 caseRecord.getSeverityScore(),
                 caseRecord.getSeverityLevel(),
                 caseRecord.getCreatedAt(),
-                decryptedVictimName,
-                decryptedVictimPhone,
+                encryptionService.decryptIdentity(victim.getEncryptedName()),
+                encryptionService.decryptIdentity(victim.getEncryptedPhone()),
                 victim.getEmail(),
-                decryptedGuardianName,
-                decryptedGuardianPhone,
-                wholeChainValid ? "VERIFIED" : "TAMPERED",
+                encryptionService.decryptIdentity(victim.getGuardianName()),
+                encryptionService.decryptIdentity(victim.getGuardianPhone()),
+                overallIntegrity,
                 wholeChainValid,
                 firstBrokenIndex,
                 firstBrokenId,
@@ -315,10 +405,17 @@ public class CaseService {
         public final String chainHashPrefix;
         public final String prevHashPrefix;
         public final String status;
+        public final Integer payloadSizeBytes;
+        public final Integer modifiedSlots;
+        public final Integer imageWidth;
+        public final Integer imageHeight;
+        public final String stegoAlgorithm;
 
         public TimelineItemDto(Long id, int sequenceNumber, String evidenceType, String description,
                                Set<SeverityTag> severityTags, int tagScore, Instant createdAt,
-                               String contentHashPrefix, String chainHashPrefix, String prevHashPrefix, String status) {
+                               String contentHashPrefix, String chainHashPrefix, String prevHashPrefix,
+                               String status, Integer payloadSizeBytes, Integer modifiedSlots,
+                               Integer imageWidth, Integer imageHeight, String stegoAlgorithm) {
             this.id = id;
             this.sequenceNumber = sequenceNumber;
             this.evidenceType = evidenceType;
@@ -330,6 +427,19 @@ public class CaseService {
             this.chainHashPrefix = chainHashPrefix;
             this.prevHashPrefix = prevHashPrefix;
             this.status = status;
+            this.payloadSizeBytes = payloadSizeBytes;
+            this.modifiedSlots = modifiedSlots;
+            this.imageWidth = imageWidth;
+            this.imageHeight = imageHeight;
+            this.stegoAlgorithm = stegoAlgorithm;
+        }
+
+        // Backward-compatible constructor
+        public TimelineItemDto(Long id, int sequenceNumber, String evidenceType, String description,
+                               Set<SeverityTag> severityTags, int tagScore, Instant createdAt,
+                               String contentHashPrefix, String chainHashPrefix, String prevHashPrefix, String status) {
+            this(id, sequenceNumber, evidenceType, description, severityTags, tagScore, createdAt,
+                 contentHashPrefix, chainHashPrefix, prevHashPrefix, status, null, null, null, null, "Hidden with key-seeded adaptive LSB");
         }
     }
 

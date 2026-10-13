@@ -43,6 +43,28 @@ public class EvidenceItem {
     @Column(nullable = false, length = 500)
     private String stegoImagePath;
 
+    @Lob
+    @Column(name = "stego_image_data", columnDefinition = "LONGBLOB")
+    private byte[] stegoImageData;
+
+    @Column(name = "master_wrapped_aes_key", columnDefinition = "MEDIUMTEXT")
+    private String masterWrappedAesKey;
+
+    @Column(name = "payload_size_bytes")
+    private Integer payloadSizeBytes;
+
+    @Column(name = "modified_slots")
+    private Integer modifiedSlots;
+
+    @Column(name = "image_width")
+    private Integer imageWidth;
+
+    @Column(name = "image_height")
+    private Integer imageHeight;
+
+    @Column(name = "stego_algorithm")
+    private String stegoAlgorithm;
+
     @Column(columnDefinition = "MEDIUMTEXT", nullable = false)
     private String wrappedAesKey; // Base64 encoded RSA-4096 wrapped AES key
 
@@ -189,5 +211,61 @@ public class EvidenceItem {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public byte[] getStegoImageData() {
+        return stegoImageData;
+    }
+
+    public void setStegoImageData(byte[] stegoImageData) {
+        this.stegoImageData = stegoImageData;
+    }
+
+    public String getMasterWrappedAesKey() {
+        return masterWrappedAesKey;
+    }
+
+    public void setMasterWrappedAesKey(String masterWrappedAesKey) {
+        this.masterWrappedAesKey = masterWrappedAesKey;
+    }
+
+    public Integer getPayloadSizeBytes() {
+        return payloadSizeBytes;
+    }
+
+    public void setPayloadSizeBytes(Integer payloadSizeBytes) {
+        this.payloadSizeBytes = payloadSizeBytes;
+    }
+
+    public Integer getModifiedSlots() {
+        return modifiedSlots;
+    }
+
+    public void setModifiedSlots(Integer modifiedSlots) {
+        this.modifiedSlots = modifiedSlots;
+    }
+
+    public Integer getImageWidth() {
+        return imageWidth;
+    }
+
+    public void setImageWidth(Integer imageWidth) {
+        this.imageWidth = imageWidth;
+    }
+
+    public Integer getImageHeight() {
+        return imageHeight;
+    }
+
+    public void setImageHeight(Integer imageHeight) {
+        this.imageHeight = imageHeight;
+    }
+
+    public String getStegoAlgorithm() {
+        return stegoAlgorithm;
+    }
+
+    public void setStegoAlgorithm(String stegoAlgorithm) {
+        this.stegoAlgorithm = stegoAlgorithm;
     }
 }

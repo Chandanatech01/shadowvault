@@ -2,7 +2,7 @@ package com.shadowvault.controller;
 
 import com.shadowvault.model.EvidenceItem;
 import com.shadowvault.repository.EvidenceItemRepository;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -14,7 +14,7 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/dev")
-@Profile("dev")
+@ConditionalOnProperty(name = "shadowvault.demo.mode", havingValue = "true")
 public class DevController {
 
     private final EvidenceItemRepository evidenceItemRepository;
@@ -48,14 +48,27 @@ public class DevController {
 
     private ResponseEntity<?> performTampering(EvidenceItem item) {
         try {
-            // 1. Physically corrupt the stego image file by flipping bytes in carrier
-            File stegoFile = new File(item.getStegoImagePath());
-            if (stegoFile.exists()) {
-                try (RandomAccessFile raf = new RandomAccessFile(stegoFile, "rw")) {
-                    long length = raf.length();
-                    if (length > 100) {
-                        raf.seek(length / 2);
-                        raf.write(new byte[]{(byte) 0xFF, (byte) 0x00, (byte) 0xAA, (byte) 0x55});
+            // 1. Physically corrupt the stego image LONGBLOB in DB
+            if (item.getStegoImageData() != null && item.getStegoImageData().length > 100) {
+                byte[] blob = item.getStegoImageData().clone();
+                int mid = blob.length / 2;
+                blob[mid] = (byte) 0xFF;
+                blob[mid + 1] = (byte) 0x00;
+                blob[mid + 2] = (byte) 0xAA;
+                blob[mid + 3] = (byte) 0x55;
+                item.setStegoImageData(blob);
+            }
+
+            // Also corrupt the file on disk if it exists
+            if (item.getStegoImagePath() != null) {
+                File stegoFile = new File(item.getStegoImagePath());
+                if (stegoFile.exists()) {
+                    try (RandomAccessFile raf = new RandomAccessFile(stegoFile, "rw")) {
+                        long length = raf.length();
+                        if (length > 100) {
+                            raf.seek(length / 2);
+                            raf.write(new byte[]{(byte) 0xFF, (byte) 0x00, (byte) 0xAA, (byte) 0x55});
+                        }
                     }
                 }
             }

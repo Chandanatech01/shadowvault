@@ -241,6 +241,49 @@ public class ShadowVaultFlowIntegrationTest {
 
     @Test
     @Order(3)
+    @DisplayName("2b. Stego Download and Decrypt Round Trip with Victim Password")
+    void testStegoDownloadAndDecryptRoundTrip() throws Exception {
+        // 1. Download stego PNG as owner victim
+        MvcResult stegoRes = mockMvc.perform(get("/api/cases/evidence/" + evidenceId + "/stego")
+                        .header("Authorization", "Bearer " + victimToken))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.IMAGE_PNG))
+                .andExpect(header().string("Content-Disposition", "attachment; filename=\"photo_" + evidenceId + ".png\""))
+                .andReturn();
+
+        byte[] downloadedPng = stegoRes.getResponse().getContentAsByteArray();
+        assertTrue(downloadedPng.length > 100);
+
+        // 2. Non-owner / unauthorized access returns 404
+        mockMvc.perform(get("/api/cases/evidence/" + evidenceId + "/stego")
+                        .header("Authorization", "Bearer " + authorityToken))
+                .andExpect(status().isNotFound());
+
+        // 3. Decrypt with wrong password returns 401
+        Map<String, String> wrongPassBody = Map.of("password", "WrongPassword123!");
+        mockMvc.perform(post("/api/cases/evidence/" + evidenceId + "/decrypt")
+                        .header("Authorization", "Bearer " + victimToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(wrongPassBody)))
+                .andExpect(status().isUnauthorized());
+
+        // 4. Decrypt with correct victim password returns original text & verified integrity
+        Map<String, String> correctPassBody = Map.of("password", "Password123!");
+        MvcResult decryptRes = mockMvc.perform(post("/api/cases/evidence/" + evidenceId + "/decrypt")
+                        .header("Authorization", "Bearer " + victimToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(correctPassBody)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode decNode = objectMapper.readTree(decryptRes.getResponse().getContentAsString());
+        assertTrue(decNode.get("verified").asBoolean());
+        assertEquals("TEXT", decNode.get("evidenceType").asText());
+        assertEquals("Full testimony: Threatening messages received on mobile device", decNode.get("textData").asText());
+    }
+
+    @Test
+    @Order(4)
     @DisplayName("3. Authority Queue and Identity Masking")
     void testAuthorityQueueAndAccessRequest() throws Exception {
         // Authority lists cases
@@ -280,7 +323,7 @@ public class ShadowVaultFlowIntegrationTest {
     }
 
     @Test
-    @Order(4)
+    @Order(5)
     @DisplayName("4. Victim Review and Approval of Access Request")
     void testVictimApproval() throws Exception {
         // Victim views pending requests on their case
@@ -305,7 +348,7 @@ public class ShadowVaultFlowIntegrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     @DisplayName("5. Authority Decrypt and Verify Evidence Chain (VERIFIED Status)")
     void testAuthorityDecryptAndVerify() throws Exception {
         // Authority views decrypted evidence dossier
@@ -327,7 +370,7 @@ public class ShadowVaultFlowIntegrationTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     @DisplayName("6. Guardian Escalation Flow when Victim is Unavailable and Real Linking Check")
     void testGuardianEscalation() throws Exception {
         // 1. Register a ward victim who gets their own invite code
@@ -460,7 +503,7 @@ public class ShadowVaultFlowIntegrationTest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     @DisplayName("7. Tamper Detection and Compromised Chain Identification")
     void testTamperDetection() throws Exception {
         // Tamper with our primary case using dev endpoint

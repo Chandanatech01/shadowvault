@@ -39,3 +39,6 @@ logs/
 
 # Local Netlify folder
 .netlify
+
+# Secrets backup
+secrets-backup.txt

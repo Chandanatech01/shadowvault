@@ -6,18 +6,22 @@ import com.shadowvault.repository.CaseRepository;
 import com.shadowvault.repository.EvidenceItemRepository;
 import com.shadowvault.service.AccessRequestService;
 import com.shadowvault.service.CaseService;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.*;
 
 @RestController
 @RequestMapping("/api/cases")
-@PreAuthorize("hasAnyRole('VICTIM', 'ROLE_VICTIM')")
 public class CaseController {
 
     private final CaseService caseService;
@@ -25,20 +29,24 @@ public class CaseController {
     private final CaseRepository caseRepository;
     private final AccessRequestRepository accessRequestRepository;
     private final EvidenceItemRepository evidenceItemRepository;
+    private final PasswordEncoder passwordEncoder;
 
     public CaseController(CaseService caseService,
                           AccessRequestService accessRequestService,
                           CaseRepository caseRepository,
                           AccessRequestRepository accessRequestRepository,
-                          EvidenceItemRepository evidenceItemRepository) {
+                          EvidenceItemRepository evidenceItemRepository,
+                          PasswordEncoder passwordEncoder) {
         this.caseService = caseService;
         this.accessRequestService = accessRequestService;
         this.caseRepository = caseRepository;
         this.accessRequestRepository = accessRequestRepository;
         this.evidenceItemRepository = evidenceItemRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @GetMapping("/my")
+    @PreAuthorize("hasAnyRole('VICTIM', 'ROLE_VICTIM')")
     public ResponseEntity<?> getMyCase(@AuthenticationPrincipal User user) {
         if (user == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
@@ -72,6 +80,7 @@ public class CaseController {
     }
 
     @PostMapping("/evidence")
+    @PreAuthorize("hasAnyRole('VICTIM', 'ROLE_VICTIM')")
     public ResponseEntity<?> uploadEvidence(@AuthenticationPrincipal User user,
                                             @RequestParam("type") String type,
                                             @RequestParam(value = "description", required = false) String description,
@@ -143,7 +152,75 @@ public class CaseController {
         }
     }
 
+    @GetMapping("/evidence/{id}/stego")
+    public ResponseEntity<?> downloadStegoImage(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        if (user == null) {
+            return ResponseEntity.status(404).build();
+        }
+        Optional<EvidenceItem> itemOpt = evidenceItemRepository.findById(id);
+        if (itemOpt.isEmpty()) {
+            return ResponseEntity.status(404).build();
+        }
+        EvidenceItem item = itemOpt.get();
+        if (!item.getVictimId().equals(user.getId())) {
+            return ResponseEntity.status(404).build();
+        }
+
+        byte[] pngBytes = item.getStegoImageData();
+        if (pngBytes == null || pngBytes.length == 0) {
+            if (item.getStegoImagePath() != null) {
+                try {
+                    pngBytes = Files.readAllBytes(new File(item.getStegoImagePath()).toPath());
+                } catch (Exception ignored) {}
+            }
+        }
+        if (pngBytes == null || pngBytes.length == 0) {
+            return ResponseEntity.status(404).build();
+        }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"photo_" + id + ".png\"")
+                .body(pngBytes);
+    }
+
+    public static class DecryptEvidenceRequest {
+        private String password;
+        public String getPassword() { return password; }
+        public void setPassword(String password) { this.password = password; }
+    }
+
+    @PostMapping("/evidence/{id}/decrypt")
+    public ResponseEntity<?> decryptEvidenceItem(@PathVariable Long id,
+                                                 @RequestBody DecryptEvidenceRequest request,
+                                                 @AuthenticationPrincipal User user) {
+        if (user == null) {
+            return ResponseEntity.status(404).body(Map.of("error", "Not found"));
+        }
+        Optional<EvidenceItem> itemOpt = evidenceItemRepository.findById(id);
+        if (itemOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Evidence item not found"));
+        }
+        EvidenceItem item = itemOpt.get();
+        if (!item.getVictimId().equals(user.getId())) {
+            return ResponseEntity.status(404).body(Map.of("error", "Not found"));
+        }
+
+        if (request == null || request.getPassword() == null ||
+            !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            return ResponseEntity.status(401).body(Map.of("error", "Invalid password"));
+        }
+
+        try {
+            Map<String, Object> decrypted = caseService.decryptEvidenceForVictim(item);
+            return ResponseEntity.ok(decrypted);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Decryption failed: " + e.getMessage()));
+        }
+    }
+
     @PostMapping("/requests/{requestId}/respond")
+    @PreAuthorize("hasAnyRole('VICTIM', 'ROLE_VICTIM')")
     public ResponseEntity<?> respondToRequest(@AuthenticationPrincipal User user,
                                               @PathVariable Long requestId,
                                               @RequestBody Map<String, Boolean> body) {
