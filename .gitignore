@@ -36,3 +36,6 @@ Thumbs.db
 *.log
 logs/
 **/logs/
+
+# Local Netlify folder
+.netlify

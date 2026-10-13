@@ -5,20 +5,30 @@
 
 ---
 
+## 🌐 Live Production Deployments
+
+| Component | Hosting Provider | Public URL | Description |
+|---|---|---|---|
+| **Frontend Web App** | **Netlify** | **[https://shadowvault-demo.netlify.app](https://shadowvault-demo.netlify.app)** | Live decoy lifestyle blog & covert ShadowVault portal |
+| **Backend REST API** | **Railway** | **[https://shadowvault-production-fb36.up.railway.app](https://shadowvault-production-fb36.up.railway.app)** | Spring Boot 3 backend with Railway MySQL 8 database |
+
+---
+
 ## 📑 Table of Contents
-1. [Architecture Overview](#-architecture-overview)
-2. [Security Design](#-security-design)
-3. [Prerequisites](#-prerequisites)
-4. [Quick Start (One Command)](#-quick-start-one-command)
-5. [Docker Compose Setup](#-docker-compose-setup)
-6. [Environment Variables](#-environment-variables)
-7. [Demo Accounts & Secret Portal Unlock](#-demo-accounts--secret-portal-unlock)
-8. [Testing & Verification](#-testing--verification)
-9. [UI Walkthrough & Screenshots](#-ui-walkthrough--screenshots)
-10. [REST API Reference](#-rest-api-reference)
-11. [Database Verification SQL Queries](#-database-verification-sql-queries)
-12. [Known Limitations](#-known-limitations)
-13. [Troubleshooting](#-troubleshooting)
+1. [Live Production Deployments](#-live-production-deployments)
+2. [Architecture Overview](#-architecture-overview)
+3. [Security Design](#-security-design)
+4. [Prerequisites](#-prerequisites)
+5. [Quick Start (One Command)](#-quick-start-one-command)
+6. [Docker Compose Setup](#-docker-compose-setup)
+7. [Environment Variables](#-environment-variables)
+8. [Real Role-Based Registration & Authentication](#-real-role-based-registration--authentication)
+9. [Secret Portal Unlock](#-secret-portal-unlock)
+10. [Testing & Verification](#-testing--verification)
+11. [UI Walkthrough & Screenshots](#-ui-walkthrough--screenshots)
+12. [REST API Reference](#-rest-api-reference)
+13. [Database Verification SQL Queries](#-database-verification-sql-queries)
+14. [Troubleshooting & Token Revocation](#-troubleshooting)
 
 ---
 
@@ -329,3 +339,8 @@ FROM access_requests;
      cd frontend && npm run build
      cd .. && Copy-Item frontend/dist/* backend/src/main/resources/static/ -Recurse -Force
      ```
+5. **Netlify CLI Token Revocation:**
+   - If you authenticated with the Netlify CLI and wish to revoke access:
+     - Log out of the CLI on your machine: `npx netlify-cli logout`
+     - Revoke access via the Netlify web dashboard: navigate to **User Settings > Applications > Authorized Applications** at [https://app.netlify.com/user/applications](https://app.netlify.com/user/applications) and click **Revoke access**.
+
