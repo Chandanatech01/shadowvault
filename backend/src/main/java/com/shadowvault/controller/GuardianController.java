@@ -29,7 +29,7 @@ public class GuardianController {
             return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
         }
 
-        List<AccessRequest> requests = accessRequestService.getPendingRequestsForGuardian(user.getUsername());
+        List<AccessRequest> requests = accessRequestService.getPendingRequestsForGuardian(user);
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (AccessRequest req : requests) {

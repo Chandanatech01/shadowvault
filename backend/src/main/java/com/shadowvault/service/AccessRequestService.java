@@ -73,6 +73,29 @@ public class AccessRequestService {
     }
 
     @Transactional
+    public boolean isGuardianLinkedToVictim(User guardian, User victim) {
+        if (guardian == null || victim == null) {
+            return false;
+        }
+        // 1. Linked by shared Guardian Invite Code
+        if (guardian.getGuardianInviteCode() != null && victim.getGuardianInviteCode() != null
+                && guardian.getGuardianInviteCode().equalsIgnoreCase(victim.getGuardianInviteCode())) {
+            return true;
+        }
+        // 2. Linked by victim's designated guardian username
+        if (victim.getGuardianUsername() != null
+                && victim.getGuardianUsername().equalsIgnoreCase(guardian.getUsername())) {
+            return true;
+        }
+        // 3. Linked by guardian's linked victim username
+        if (guardian.getLinkedVictimUsername() != null
+                && guardian.getLinkedVictimUsername().equalsIgnoreCase(victim.getUsername())) {
+            return true;
+        }
+        return false;
+    }
+
+    @Transactional
     public AccessRequest respondByGuardian(Long requestId, User guardian, boolean approve) {
         AccessRequest request = accessRequestRepository.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Access request not found: " + requestId));
@@ -80,11 +103,8 @@ public class AccessRequestService {
         CaseRecord caseRecord = request.getCaseRecord();
         User victim = caseRecord.getVictim();
 
-        // Check guardian relationship: guardian username matches or user has guardian role
-        boolean isDesignatedGuardian = guardian.getUsername().equalsIgnoreCase(victim.getGuardianUsername())
-                || "ROLE_GUARDIAN".equals(guardian.getRole().name());
-
-        if (!isDesignatedGuardian) {
+        // Enforce real link: guardian must be linked to this victim
+        if (!isGuardianLinkedToVictim(guardian, victim)) {
             throw new IllegalArgumentException("You are not registered as the guardian for this victim");
         }
 
@@ -122,7 +142,19 @@ public class AccessRequestService {
         return accessRequestRepository.findByCaseRecordVictimIdOrderByCreatedAtDesc(victimId);
     }
 
+    public List<AccessRequest> getPendingRequestsForGuardian(User guardian) {
+        if (guardian == null) {
+            return List.of();
+        }
+        return accessRequestRepository.findByStatusOrderByCreatedAtDesc("PENDING").stream()
+                .filter(req -> isGuardianLinkedToVictim(guardian, req.getCaseRecord().getVictim()))
+                .toList();
+    }
+
     public List<AccessRequest> getPendingRequestsForGuardian(String guardianUsername) {
+        if (guardianUsername == null || guardianUsername.trim().isEmpty()) {
+            return List.of();
+        }
         return accessRequestRepository.findByStatusOrderByCreatedAtDesc("PENDING").stream()
                 .filter(req -> guardianUsername.equalsIgnoreCase(req.getCaseRecord().getVictim().getGuardianUsername()))
                 .toList();

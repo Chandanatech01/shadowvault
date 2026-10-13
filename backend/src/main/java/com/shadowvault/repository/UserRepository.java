@@ -14,4 +14,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
     List<User> findByGuardianUsername(String guardianUsername);
+    Optional<User> findByGuardianInviteCode(String guardianInviteCode);
+    boolean existsByGuardianInviteCode(String guardianInviteCode);
+    Optional<User> findByGuardianInviteCodeAndRole(String guardianInviteCode, com.shadowvault.model.Role role);
+    boolean existsByGuardianInviteCodeAndRole(String guardianInviteCode, com.shadowvault.model.Role role);
 }

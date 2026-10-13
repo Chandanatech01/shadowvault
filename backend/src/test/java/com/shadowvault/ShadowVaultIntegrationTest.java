@@ -9,8 +9,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.MySQLContainer;
@@ -56,24 +56,25 @@ public class ShadowVaultIntegrationTest {
     private static String victimToken;
     private static String authorityToken;
     private static String guardianToken;
+    private static String victimInviteCode;
     private static String caseId;
     private static Long evidenceId;
     private static Long accessRequestId;
 
     @Test
     @Order(1)
-    @DisplayName("1. User Registration and Login for all roles")
+    @DisplayName("1. User Registration, Validations, Guardian Linking and Login for all roles")
     void testRegistrationAndLogin() throws Exception {
         // Register new victim
         Map<String, String> regBody = Map.of(
+                "role", "VICTIM",
                 "fullName", "Integration Test Victim",
                 "phone", "+91 99999 11111",
                 "email", "integ_victim@test.org",
                 "username", "integ_victim",
-                "password", "demo123",
+                "password", "Password123!",
                 "guardianName", "Integ Guardian",
-                "guardianPhone", "+91 99999 22222",
-                "guardianUsername", "guardian1"
+                "guardianPhone", "+91 99999 22222"
         );
 
         MvcResult regRes = mockMvc.perform(post("/api/auth/register")
@@ -87,9 +88,47 @@ public class ShadowVaultIntegrationTest {
         assertEquals("integ_victim", regNode.get("user").get("username").asText());
         assertEquals("ROLE_VICTIM", regNode.get("user").get("role").asText());
         assertNotNull(regNode.get("simulatedOtp"));
+        assertNotNull(regNode.get("guardianInviteCode"));
+        victimInviteCode = regNode.get("guardianInviteCode").asText();
+
+        // Register linked guardian using invite code
+        Map<String, String> guardRegBody = Map.of(
+                "role", "GUARDIAN",
+                "fullName", "Integ Guardian",
+                "phone", "+91 99999 22222",
+                "email", "integ_guard@test.org",
+                "username", "integ_guard",
+                "password", "Password123!",
+                "guardianInviteCode", victimInviteCode
+        );
+        MvcResult guardRegRes = mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(guardRegBody)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode guardRegNode = objectMapper.readTree(guardRegRes.getResponse().getContentAsString());
+        assertEquals("ROLE_GUARDIAN", guardRegNode.get("user").get("role").asText());
+        assertEquals("integ_victim", guardRegNode.get("linkedVictim").asText());
+
+        // Register authority
+        Map<String, String> authRegBody = Map.of(
+                "role", "AUTHORITY",
+                "fullName", "Integ Authority",
+                "phone", "+91 98111 22334",
+                "email", "integ_auth@test.org",
+                "username", "integ_auth",
+                "password", "Password123!",
+                "department", "Cyber Crime Division",
+                "authorityAccessCode", "AUTH-2026"
+        );
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(authRegBody)))
+                .andExpect(status().isOk());
 
         // Login as newly created victim
-        Map<String, String> loginBody = Map.of("username", "integ_victim", "password", "demo123");
+        Map<String, String> loginBody = Map.of("username", "integ_victim", "password", "Password123!");
         MvcResult loginRes = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(loginBody)))
@@ -100,23 +139,25 @@ public class ShadowVaultIntegrationTest {
         victimToken = loginNode.get("token").asText();
         assertNotNull(victimToken);
 
-        // Login as seeded authority
-        Map<String, String> authLogin = Map.of("username", "authority1", "password", "demo123");
-        MvcResult authRes = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(authLogin)))
-                .andExpect(status().isOk())
-                .andReturn();
-        authorityToken = objectMapper.readTree(authRes.getResponse().getContentAsString()).get("token").asText();
-
-        // Login as seeded guardian
-        Map<String, String> guardLogin = Map.of("username", "guardian1", "password", "demo123");
+        // Login as newly created guardian
+        Map<String, String> guardLogin = Map.of("username", "integ_guard", "password", "Password123!");
         MvcResult guardRes = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(guardLogin)))
                 .andExpect(status().isOk())
                 .andReturn();
         guardianToken = objectMapper.readTree(guardRes.getResponse().getContentAsString()).get("token").asText();
+        assertNotNull(guardianToken);
+
+        // Login as newly created authority
+        Map<String, String> authLogin = Map.of("username", "integ_auth", "password", "Password123!");
+        MvcResult authRes = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(authLogin)))
+                .andExpect(status().isOk())
+                .andReturn();
+        authorityToken = objectMapper.readTree(authRes.getResponse().getContentAsString()).get("token").asText();
+        assertNotNull(authorityToken);
     }
 
     @Test
@@ -182,7 +223,7 @@ public class ShadowVaultIntegrationTest {
         }
         assertNotNull(targetCase, "Uploaded case must be visible to authority");
         assertFalse(targetCase.get("accessGranted").asBoolean());
-        assertNull(targetCase.get("victimName")); // Masked before approval!
+        assertNull(targetCase.get("victimName")); // Masked before approval
 
         // Authority submits access request
         Map<String, String> reqBody = Map.of("reason", "Official cybercrime division investigation");
@@ -249,31 +290,48 @@ public class ShadowVaultIntegrationTest {
     @Order(6)
     @DisplayName("6. Guardian Escalation Flow when Victim is Unavailable")
     void testGuardianEscalation() throws Exception {
-        // 1. Register a ward victim who designates guardian1
+        // 1. Register a ward victim who gets invite code
         Map<String, String> escReg = Map.of(
+                "role", "VICTIM",
                 "fullName", "Escalation Victim",
                 "phone", "+91 99999 55555",
                 "email", "esc_victim@test.org",
                 "username", "esc_victim",
-                "password", "demo123",
-                "guardianName", "Anita Guardian",
-                "guardianPhone", "+91 99999 66666",
-                "guardianUsername", "guardian1"
+                "password", "Password123!"
         );
         MvcResult escRegRes = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(escReg)))
                 .andExpect(status().isOk())
                 .andReturn();
-        String escVictimToken = objectMapper.readTree(escRegRes.getResponse().getContentAsString()).get("token").asText();
+        JsonNode escNode = objectMapper.readTree(escRegRes.getResponse().getContentAsString());
+        String escVictimToken = escNode.get("token").asText();
+        String escInviteCode = escNode.get("guardianInviteCode").asText();
 
-        // 2. Ward marks self as UNAVAILABLE
+        // 2. Register linked guardian
+        Map<String, String> escGuardReg = Map.of(
+                "role", "GUARDIAN",
+                "fullName", "Anita Guardian",
+                "phone", "+91 99999 66666",
+                "email", "esc_guardian@test.org",
+                "username", "esc_guardian",
+                "password", "Password123!",
+                "guardianInviteCode", escInviteCode
+        );
+        MvcResult escGuardRes = mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(escGuardReg)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String escGuardianToken = objectMapper.readTree(escGuardRes.getResponse().getContentAsString()).get("token").asText();
+
+        // 3. Ward marks self as UNAVAILABLE
         mockMvc.perform(post("/api/auth/toggle-availability")
                         .header("Authorization", "Bearer " + escVictimToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.unavailable").value(true));
 
-        // 3. Ward submits evidence to create an active case
+        // 4. Ward submits evidence to create an active case
         MvcResult uploadRes = mockMvc.perform(multipart("/api/cases/evidence")
                         .param("type", "TEXT")
                         .param("description", "Escalation test statement")
@@ -283,7 +341,7 @@ public class ShadowVaultIntegrationTest {
                 .andReturn();
         String c2Id = objectMapper.readTree(uploadRes.getResponse().getContentAsString()).get("caseId").asText();
 
-        // 4. Authority requests access to ward's case
+        // 5. Authority requests access to ward's case
         MvcResult req2Res = mockMvc.perform(post("/api/authority/cases/" + c2Id + "/request-access")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("reason", "Urgent escalation review")))
@@ -292,9 +350,9 @@ public class ShadowVaultIntegrationTest {
                 .andReturn();
         Long req2Id = objectMapper.readTree(req2Res.getResponse().getContentAsString()).get("id").asLong();
 
-        // 5. Guardian checks pending requests for their ward
+        // 6. Guardian checks pending requests for their ward
         MvcResult guardReqsRes = mockMvc.perform(get("/api/guardian/requests")
-                        .header("Authorization", "Bearer " + guardianToken))
+                        .header("Authorization", "Bearer " + escGuardianToken))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -312,15 +370,15 @@ public class ShadowVaultIntegrationTest {
         assertTrue(targetReq.get("victimUnavailable").asBoolean());
         assertTrue(targetReq.get("canApprove").asBoolean());
 
-        // 6. Guardian approves access
+        // 7. Guardian approves access
         mockMvc.perform(post("/api/guardian/requests/" + req2Id + "/respond")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("approve", true)))
-                        .header("Authorization", "Bearer " + guardianToken))
+                        .header("Authorization", "Bearer " + escGuardianToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("APPROVED"));
 
-        // 7. Authority can now view the unlocked evidence
+        // 8. Authority can now view the unlocked evidence
         mockMvc.perform(get("/api/authority/cases/" + c2Id + "/evidence")
                         .header("Authorization", "Bearer " + authorityToken))
                 .andExpect(status().isOk())

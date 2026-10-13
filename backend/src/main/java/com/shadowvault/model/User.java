@@ -38,6 +38,15 @@ public class User {
 
     private String guardianUsername;
 
+    @Column
+    private String guardianInviteCode;
+
+    @Column
+    private String linkedVictimUsername;
+
+    @Column
+    private String department;
+
     @Column(nullable = false)
     private boolean unavailable = false;
 
@@ -131,6 +140,30 @@ public class User {
 
     public void setGuardianUsername(String guardianUsername) {
         this.guardianUsername = guardianUsername;
+    }
+
+    public String getGuardianInviteCode() {
+        return guardianInviteCode;
+    }
+
+    public void setGuardianInviteCode(String guardianInviteCode) {
+        this.guardianInviteCode = guardianInviteCode;
+    }
+
+    public String getLinkedVictimUsername() {
+        return linkedVictimUsername;
+    }
+
+    public void setLinkedVictimUsername(String linkedVictimUsername) {
+        this.linkedVictimUsername = linkedVictimUsername;
+    }
+
+    public String getDepartment() {
+        return department;
+    }
+
+    public void setDepartment(String department) {
+        this.department = department;
     }
 
     public boolean isUnavailable() {

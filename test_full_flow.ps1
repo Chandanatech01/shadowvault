@@ -1,281 +1,283 @@
-# Full end-to-end integration test suite against MySQL 8 backend
+# ==============================================================================
+# ShadowVault End-to-End Test Suite with Brand-New Accounts (MySQL 8 Runtime)
+# ==============================================================================
 
 $baseUrl = "http://localhost:8080/api"
 $results = [ordered]@{}
+$rand = Get-Random -Minimum 10000 -Maximum 99999
 
-Write-Host "===================================================="
-Write-Host "ShadowVault Full Flow Test Suite (MySQL 8 Runtime)"
-Write-Host "===================================================="
+Write-Host "=================================================================="
+Write-Host "ShadowVault Real Authentication & Trust Flow Test Suite"
+Write-Host "Run ID: $rand against $baseUrl"
+Write-Host "=================================================================="
 
-# ---------------------------------------------------------------
-# Step 1: Register a new victim (with Guardian link)
-# ---------------------------------------------------------------
-$regToken = $null
-$regUser = $null
-try {
-    $uname = "sunita_" + (Get-Random -Minimum 1000 -Maximum 9999)
-    $mail = $uname + "@shadowvault.local"
-    $regBody = @{
-        username = $uname
-        email = $mail
-        password = "Password123!"
-        fullName = "Sunita Rao"
-        phone = "+91 99887 76655"
-        guardianName = "Anita Sharma"
-        guardianPhone = "+91 98765 43211"
-        guardianUsername = "guardian1"
-    } | ConvertTo-Json
-    
-    $regRes = Invoke-RestMethod -Uri "$baseUrl/auth/register" -Method Post -Body $regBody -ContentType "application/json"
-    $regToken = $regRes.token
-    $regUser = $regRes.username
-    if ($regToken -and $regRes.simulatedOtp) {
-        $results["1_Register"] = "PASSED - Created victim user '$regUser' with simulated OTP $($regRes.simulatedOtp)"
-        Write-Host "[PASS] 1. Register: PASSED"
-    } else {
-        $results["1_Register"] = "FAILED - Missing token or simulated OTP"
-        Write-Host "[FAIL] 1. Register: FAILED"
-    }
-} catch {
-    $results["1_Register"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 1. Register: FAILED - $($_.Exception.Message)"
-}
+$LF = "`r`n"
+$enc = [System.Text.Encoding]::UTF8
 
-# ---------------------------------------------------------------
-# Step 2: Login as victim1
-# ---------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# 1. Register brand-new Victim
+# ------------------------------------------------------------------------------
+$victimUname = "victim_$rand"
 $victimToken = $null
+$inviteCode = $null
 try {
-    $loginBody = @{ username = "victim1"; password = "demo123" } | ConvertTo-Json
-    $loginRes = Invoke-RestMethod -Uri "$baseUrl/auth/login" -Method Post -Body $loginBody -ContentType "application/json"
-    $victimToken = $loginRes.token
-    if ($victimToken) {
-        $results["2_VictimLogin"] = "PASSED - Authenticated victim1, JWT issued"
-        Write-Host "[PASS] 2. Login victim1: PASSED"
+    $victimBody = @{
+        role = "VICTIM"
+        fullName = "Test Victim $rand"
+        phone = "+91 98765 11111"
+        email = "$victimUname@shadowvault.local"
+        username = $victimUname
+        password = "Password123!"
+        guardianName = "Guardian Nominee $rand"
+        guardianPhone = "+91 98765 22222"
+    } | ConvertTo-Json
+
+    $vRes = Invoke-RestMethod -Uri "$baseUrl/auth/register" -Method Post -Body $victimBody -ContentType "application/json"
+    $victimToken = $vRes.token
+    $inviteCode = $vRes.guardianInviteCode
+    $otp = $vRes.simulatedOtp
+
+    if ($victimToken -and $inviteCode -and $otp) {
+        $results["1_RegisterVictim"] = "PASSED - Created '$victimUname' | OTP: $otp | Invite Code: $inviteCode"
+        Write-Host "[PASS] 1. Register Victim: PASSED (Invite Code: $inviteCode, OTP: $otp)" -ForegroundColor Green
     } else {
-        $results["2_VictimLogin"] = "FAILED - No token returned"
-        Write-Host "[FAIL] 2. Login victim1: FAILED"
+        throw "Missing token ($victimToken), inviteCode ($inviteCode), or OTP ($otp)"
     }
 } catch {
-    $results["2_VictimLogin"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 2. Login victim1: FAILED - $($_.Exception.Message)"
+    $results["1_RegisterVictim"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 1. Register Victim: FAILED - $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# ---------------------------------------------------------------
-# Step 3: Upload Text, Image, Audio Evidence for victim1
-# ---------------------------------------------------------------
-$victimCaseId = $null
+# ------------------------------------------------------------------------------
+# 2. Register brand-new Guardian with the invite code
+# ------------------------------------------------------------------------------
+$guardianUname = "guardian_$rand"
+$guardianToken = $null
 try {
-    $LF = "`r`n"
-    $enc = [System.Text.Encoding]::UTF8
+    $guardianBody = @{
+        role = "GUARDIAN"
+        fullName = "Test Guardian $rand"
+        phone = "+91 98765 22222"
+        email = "$guardianUname@shadowvault.local"
+        username = $guardianUname
+        password = "Password123!"
+        guardianInviteCode = $inviteCode
+    } | ConvertTo-Json
 
-    # 3a. Text statement
+    $gRes = Invoke-RestMethod -Uri "$baseUrl/auth/register" -Method Post -Body $guardianBody -ContentType "application/json"
+    $guardianToken = $gRes.token
+    $linkedVictim = $gRes.linkedVictim
+
+    if ($guardianToken -and ($linkedVictim -eq $victimUname)) {
+        $results["2_RegisterGuardian"] = "PASSED - Created '$guardianUname' linked to victim '$linkedVictim'"
+        Write-Host "[PASS] 2. Register Guardian: PASSED (Linked to: $linkedVictim)" -ForegroundColor Green
+    } else {
+        throw "Guardian linking failed. Returned linkedVictim: $linkedVictim"
+    }
+} catch {
+    $results["2_RegisterGuardian"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 2. Register Guardian: FAILED - $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# ------------------------------------------------------------------------------
+# 3. Register brand-new Authority with the access code (AUTH-2026)
+# ------------------------------------------------------------------------------
+$authorityUname = "authority_$rand"
+$authorityToken = $null
+try {
+    $authBody = @{
+        role = "AUTHORITY"
+        fullName = "Inspector Verma $rand"
+        phone = "+91 98111 33333"
+        email = "$authorityUname@shadowvault.gov.in"
+        username = $authorityUname
+        password = "Password123!"
+        department = "Cyber Crime Investigation Cell"
+        authorityAccessCode = "AUTH-2026"
+    } | ConvertTo-Json
+
+    $aRes = Invoke-RestMethod -Uri "$baseUrl/auth/register" -Method Post -Body $authBody -ContentType "application/json"
+    $authorityToken = $aRes.token
+    $dept = $aRes.user.department
+
+    if ($authorityToken -and $dept) {
+        $results["3_RegisterAuthority"] = "PASSED - Created '$authorityUname' for department '$dept'"
+        Write-Host "[PASS] 3. Register Authority: PASSED (Department: $dept)" -ForegroundColor Green
+    } else {
+        throw "Authority creation failed"
+    }
+} catch {
+    $results["3_RegisterAuthority"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 3. Register Authority: FAILED - $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# ------------------------------------------------------------------------------
+# 4. Victim uploads two items (Text & Image)
+# ------------------------------------------------------------------------------
+$caseId = $null
+$evidenceId1 = $null
+$evidenceId2 = $null
+try {
+    # 4a. Item 1 - Text statement
     $boundaryA = [System.Guid]::NewGuid().ToString()
     $bodyLinesA = @(
         "--$boundaryA", 'Content-Disposition: form-data; name="type"', '', 'TEXT',
-        "--$boundaryA", 'Content-Disposition: form-data; name="description"', '', 'Threatening handwritten letter left on car windshield.',
-        "--$boundaryA", 'Content-Disposition: form-data; name="text"', '', 'We are watching you every day. Withdraw your report immediately.',
+        "--$boundaryA", 'Content-Disposition: form-data; name="description"', '', 'Direct extortion threat note.',
+        "--$boundaryA", 'Content-Disposition: form-data; name="text"', '', 'Pay 50,000 INR immediately or confidential data will be released.',
         "--$boundaryA", 'Content-Disposition: form-data; name="tags"', '', 'THREAT,HARASSMENT',
         "--$boundaryA--"
     ) -join $LF
     $headersA = @{ "Authorization" = "Bearer $victimToken"; "Content-Type" = "multipart/form-data; boundary=$boundaryA" }
     $textRes = Invoke-RestMethod -Uri "$baseUrl/cases/evidence" -Method Post -Body $bodyLinesA -Headers $headersA
-    $victimCaseId = $textRes.caseId
-    Write-Host "[PASS] 3a. Upload Text Evidence: PASSED (Case: $victimCaseId)"
+    $caseId = $textRes.caseId
+    $evidenceId1 = $textRes.evidenceId
+    Write-Host "[PASS] 4a. Upload Text Evidence: PASSED (Case: $caseId, Seq: $($textRes.sequenceNumber))" -ForegroundColor Green
 
-    # 3b. Image evidence
+    # 4b. Item 2 - Image file
     $boundaryB = [System.Guid]::NewGuid().ToString()
     $pngBytes = [System.Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
     $msB = New-Object System.IO.MemoryStream
     $b = $enc.GetBytes("--$boundaryB$LF" + "Content-Disposition: form-data; name=`"type`"$LF$LF" + "IMAGE$LF"); $msB.Write($b, 0, $b.Length)
-    $b = $enc.GetBytes("--$boundaryB$LF" + "Content-Disposition: form-data; name=`"description`"$LF$LF" + "Photo of vandalized property door lock.$LF"); $msB.Write($b, 0, $b.Length)
-    $b = $enc.GetBytes("--$boundaryB$LF" + "Content-Disposition: form-data; name=`"tags`"$LF$LF" + "PHYSICAL_HARM$LF"); $msB.Write($b, 0, $b.Length)
-    $b = $enc.GetBytes("--$boundaryB$LF" + "Content-Disposition: form-data; name=`"file`"; filename=`"vandalism.png`"$LF" + "Content-Type: image/png$LF$LF"); $msB.Write($b, 0, $b.Length)
+    $b = $enc.GetBytes("--$boundaryB$LF" + "Content-Disposition: form-data; name=`"description`"$LF$LF" + "CCTV capture of suspicious individual outside residence.$LF"); $msB.Write($b, 0, $b.Length)
+    $b = $enc.GetBytes("--$boundaryB$LF" + "Content-Disposition: form-data; name=`"tags`"$LF$LF" + "PHYSICAL_HARM,STALKING$LF"); $msB.Write($b, 0, $b.Length)
+    $b = $enc.GetBytes("--$boundaryB$LF" + "Content-Disposition: form-data; name=`"file`"; filename=`"cctv.png`"$LF" + "Content-Type: image/png$LF$LF"); $msB.Write($b, 0, $b.Length)
     $msB.Write($pngBytes, 0, $pngBytes.Length)
     $b = $enc.GetBytes("$LF--$boundaryB--$LF"); $msB.Write($b, 0, $b.Length)
     $bytesB = $msB.ToArray(); $msB.Dispose()
     $headersB = @{ "Authorization" = "Bearer $victimToken"; "Content-Type" = "multipart/form-data; boundary=$boundaryB" }
     $imgRes = Invoke-RestMethod -Uri "$baseUrl/cases/evidence" -Method Post -Body $bytesB -Headers $headersB
-    Write-Host "[PASS] 3b. Upload Image Evidence: PASSED"
+    $evidenceId2 = $imgRes.evidenceId
+    Write-Host "[PASS] 4b. Upload Image Evidence: PASSED (Case: $caseId, Seq: $($imgRes.sequenceNumber), PrevHash: $($imgRes.prevChainHash.Substring(0, 10))...)" -ForegroundColor Green
 
-    # 3c. Audio evidence
-    $boundaryC = [System.Guid]::NewGuid().ToString()
-    $audioBytes = [System.Text.Encoding]::UTF8.GetBytes("RIFFtestWAVEfmt fake audio recording of perpetrator vocal threats")
-    $msC = New-Object System.IO.MemoryStream
-    $b = $enc.GetBytes("--$boundaryC$LF" + "Content-Disposition: form-data; name=`"type`"$LF$LF" + "AUDIO$LF"); $msC.Write($b, 0, $b.Length)
-    $b = $enc.GetBytes("--$boundaryC$LF" + "Content-Disposition: form-data; name=`"description`"$LF$LF" + "Repeated threatening voicemail message.$LF"); $msC.Write($b, 0, $b.Length)
-    $b = $enc.GetBytes("--$boundaryC$LF" + "Content-Disposition: form-data; name=`"tags`"$LF$LF" + "STALKING,REPEATED_INCIDENT$LF"); $msC.Write($b, 0, $b.Length)
-    $b = $enc.GetBytes("--$boundaryC$LF" + "Content-Disposition: form-data; name=`"file`"; filename=`"voicemail.wav`"$LF" + "Content-Type: audio/wav$LF$LF"); $msC.Write($b, 0, $b.Length)
-    $msC.Write($audioBytes, 0, $audioBytes.Length)
-    $b = $enc.GetBytes("$LF--$boundaryC--$LF"); $msC.Write($b, 0, $b.Length)
-    $bytesC = $msC.ToArray(); $msC.Dispose()
-    $headersC = @{ "Authorization" = "Bearer $victimToken"; "Content-Type" = "multipart/form-data; boundary=$boundaryC" }
-    $audioRes = Invoke-RestMethod -Uri "$baseUrl/cases/evidence" -Method Post -Body $bytesC -Headers $headersC
-    Write-Host "[PASS] 3c. Upload Audio Evidence: PASSED"
-
-    $results["3_UploadEvidence"] = "PASSED - Uploaded TEXT, IMAGE, AUDIO (Severity Score: $($audioRes.caseSeverityScore), Tier: $($audioRes.caseSeverityLevel))"
+    $results["4_UploadTwoItems"] = "PASSED - Uploaded 2 items in chain (Case: $caseId, Tier: $($imgRes.caseSeverityLevel))"
 } catch {
-    $results["3_UploadEvidence"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 3. Upload Evidence: FAILED - $($_.Exception.Message)"
+    $results["4_UploadTwoItems"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 4. Upload Two Items: FAILED - $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# ---------------------------------------------------------------
-# Step 4: Authority Login & Queue Inspection
-# ---------------------------------------------------------------
-$authorityToken = $null
+# ------------------------------------------------------------------------------
+# 5. Authority requests access
+# ------------------------------------------------------------------------------
+$requestId = $null
 try {
-    $authLoginBody = @{ username = "authority1"; password = "demo123" } | ConvertTo-Json
-    $authLoginRes = Invoke-RestMethod -Uri "$baseUrl/auth/login" -Method Post -Body $authLoginBody -ContentType "application/json"
-    $authorityToken = $authLoginRes.token
-
-    $queueRes = Invoke-RestMethod -Uri "$baseUrl/authority/cases" -Method Get -Headers @{ "Authorization" = "Bearer $authorityToken" }
-    if ($queueRes.Count -ge 1) {
-        $results["4_AuthorityQueue"] = "PASSED - Retrieved $($queueRes.Count) case(s) from authority investigation queue"
-        Write-Host "[PASS] 4. Authority Queue: PASSED"
+    $reqBody = @{ reason = "Official forensic investigation of online extortion" } | ConvertTo-Json
+    $reqRes = Invoke-RestMethod -Uri "$baseUrl/authority/cases/$caseId/request-access" -Method Post -Body $reqBody -Headers @{ "Authorization" = "Bearer $authorityToken" } -ContentType "application/json"
+    $requestId = $reqRes.requestId
+    if ($requestId -and $reqRes.status -eq "PENDING") {
+        $results["5_AuthorityRequestAccess"] = "PASSED - Request created (ID: $requestId, Status: PENDING)"
+        Write-Host "[PASS] 5. Authority Requests Access: PASSED (Request ID: $requestId, Status: PENDING)" -ForegroundColor Green
     } else {
-        $results["4_AuthorityQueue"] = "FAILED - Queue empty"
-        Write-Host "[FAIL] 4. Authority Queue: FAILED"
+        throw "Invalid access request response"
     }
 } catch {
-    $results["4_AuthorityQueue"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 4. Authority Queue: FAILED - $($_.Exception.Message)"
+    $results["5_AuthorityRequestAccess"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 5. Authority Requests Access: FAILED - $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# ---------------------------------------------------------------
-# Step 5: Authority Requests Access for victim1 Case
-# ---------------------------------------------------------------
-$reqId1 = $null
+# ------------------------------------------------------------------------------
+# 6. Victim marks unavailable
+# ------------------------------------------------------------------------------
 try {
-    $reqBody = @{ reason = "Official cyber crime division investigation" } | ConvertTo-Json
-    $reqRes = Invoke-RestMethod -Uri "$baseUrl/authority/cases/$victimCaseId/request-access" -Method Post -Body $reqBody -Headers @{ "Authorization" = "Bearer $authorityToken" } -ContentType "application/json"
-    $reqId1 = $reqRes.requestId
-    if ($reqId1 -and $reqRes.status -eq "PENDING") {
-        $results["5_AuthorityRequest"] = "PASSED - Request created (ID: $reqId1, Status: PENDING)"
-        Write-Host "[PASS] 5. Authority Request: PASSED"
+    $toggleRes = Invoke-RestMethod -Uri "$baseUrl/auth/toggle-availability" -Method Post -Body "{}" -Headers @{ "Authorization" = "Bearer $victimToken" } -ContentType "application/json"
+    if ($toggleRes.unavailable -eq $true) {
+        $results["6_VictimMarksUnavailable"] = "PASSED - Victim marked UNAVAILABLE (Escalation unlocked for Guardian)"
+        Write-Host "[PASS] 6. Victim Marks Unavailable: PASSED (Unavailable: true)" -ForegroundColor Green
     } else {
-        $results["5_AuthorityRequest"] = "FAILED"
-        Write-Host "[FAIL] 5. Authority Request: FAILED"
+        throw "Failed to set unavailable status"
     }
 } catch {
-    $results["5_AuthorityRequest"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 5. Authority Request: FAILED - $($_.Exception.Message)"
+    $results["6_VictimMarksUnavailable"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 6. Victim Marks Unavailable: FAILED - $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# ---------------------------------------------------------------
-# Step 6: Victim Approval
-# ---------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# 7. Guardian approves access
+# ------------------------------------------------------------------------------
 try {
-    $respondBody = @{ approve = $true } | ConvertTo-Json
-    $respondRes = Invoke-RestMethod -Uri "$baseUrl/cases/requests/$reqId1/respond" -Method Post -Body $respondBody -Headers @{ "Authorization" = "Bearer $victimToken" } -ContentType "application/json"
-    if ($respondRes.status -eq "APPROVED" -and $respondRes.accessGranted -eq $true) {
-        $results["6_VictimApproval"] = "PASSED - Request approved by victim, AccessGranted=true"
-        Write-Host "[PASS] 6. Victim Approval: PASSED"
+    # 7a. Guardian inspects pending queue
+    $guardRequests = Invoke-RestMethod -Uri "$baseUrl/guardian/requests" -Method Get -Headers @{ "Authorization" = "Bearer $guardianToken" }
+    $targetReq = $guardRequests | Where-Object { $_.id -eq $requestId }
+
+    if (-not $targetReq) {
+        throw "Guardian could not locate request $requestId for linked ward $victimUname"
+    }
+    if (-not $targetReq.canApprove) {
+        throw "Guardian canApprove flag is false despite victim being marked unavailable"
+    }
+    Write-Host "[PASS] 7a. Guardian Sees Ward Request: PASSED (canApprove=$($targetReq.canApprove), victimUnavailable=$($targetReq.victimUnavailable))" -ForegroundColor Green
+
+    # 7b. Guardian approves
+    $approveBody = @{ approve = $true } | ConvertTo-Json
+    $approveRes = Invoke-RestMethod -Uri "$baseUrl/guardian/requests/$requestId/respond" -Method Post -Body $approveBody -Headers @{ "Authorization" = "Bearer $guardianToken" } -ContentType "application/json"
+
+    if ($approveRes.status -eq "APPROVED" -and $approveRes.accessGranted -eq $true -and $approveRes.approvedBy -eq "GUARDIAN") {
+        $results["7_GuardianApproves"] = "PASSED - Approved by Guardian '$guardianUname' (accessGranted: true)"
+        Write-Host "[PASS] 7b. Guardian Approves Access: PASSED (ApprovedBy: GUARDIAN, AccessGranted: true)" -ForegroundColor Green
     } else {
-        $results["6_VictimApproval"] = "FAILED - Status=$($respondRes.status)"
-        Write-Host "[FAIL] 6. Victim Approval: FAILED"
+        throw "Approval failed: status=$($approveRes.status)"
     }
 } catch {
-    $results["6_VictimApproval"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 6. Victim Approval: FAILED - $($_.Exception.Message)"
+    $results["7_GuardianApproves"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 7. Guardian Approves: FAILED - $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# ---------------------------------------------------------------
-# Step 7: Guardian Escalation & Approval Flow (Tested on second case)
-# ---------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# 8. Authority decrypts and sees VERIFIED
+# ------------------------------------------------------------------------------
 try {
-    # 7a. Sunita (registered victim from Step 1) uploads evidence and marks self unavailable
-    $boundaryReg = [System.Guid]::NewGuid().ToString()
-    $bodyReg = @(
-        "--$boundaryReg", 'Content-Disposition: form-data; name="type"', '', 'TEXT',
-        "--$boundaryReg", 'Content-Disposition: form-data; name="description"', '', 'Harassment log',
-        "--$boundaryReg", 'Content-Disposition: form-data; name="text"', '', 'Witnessed harassment statement.',
-        "--$boundaryReg", 'Content-Disposition: form-data; name="tags"', '', 'HARASSMENT',
-        "--$boundaryReg--"
-    ) -join $LF
-    $headersReg = @{ "Authorization" = "Bearer $regToken"; "Content-Type" = "multipart/form-data; boundary=$boundaryReg" }
-    $regEvidenceRes = Invoke-RestMethod -Uri "$baseUrl/cases/evidence" -Method Post -Body $bodyReg -Headers $headersReg
-    $regCaseId = $regEvidenceRes.caseId
+    $evidenceReport = Invoke-RestMethod -Uri "$baseUrl/authority/cases/$caseId/evidence" -Method Get -Headers @{ "Authorization" = "Bearer $authorityToken" }
 
-    # Mark Sunita unavailable to trigger immediate guardian escalation
-    Invoke-RestMethod -Uri "$baseUrl/auth/toggle-availability" -Method Post -Body "{}" -Headers @{ "Authorization" = "Bearer $regToken" } -ContentType "application/json" | Out-Null
+    $chainValid = $evidenceReport.chainValid
+    $overallIntegrity = $evidenceReport.overallIntegrity
+    $victimName = $evidenceReport.victimName
+    $itemsCount = $evidenceReport.items.Count
 
-    # 7b. Authority requests access for Sunita's case
-    $gReqBody = @{ reason = "Legal aid emergency review" } | ConvertTo-Json
-    $gReqRes = Invoke-RestMethod -Uri "$baseUrl/authority/cases/$regCaseId/request-access" -Method Post -Body $gReqBody -Headers @{ "Authorization" = "Bearer $authorityToken" } -ContentType "application/json"
-    $gReqId = $gReqRes.requestId
-
-    # 7c. Guardian login
-    $guardianLoginBody = @{ username = "guardian1"; password = "demo123" } | ConvertTo-Json
-    $guardianLoginRes = Invoke-RestMethod -Uri "$baseUrl/auth/login" -Method Post -Body $guardianLoginBody -ContentType "application/json"
-    $guardianToken = $guardianLoginRes.token
-
-    # 7d. Guardian approves
-    $gApproveBody = @{ approve = $true } | ConvertTo-Json
-    $gApproveRes = Invoke-RestMethod -Uri "$baseUrl/guardian/requests/$gReqId/respond" -Method Post -Body $gApproveBody -Headers @{ "Authorization" = "Bearer $guardianToken" } -ContentType "application/json"
-    if ($gApproveRes.status -eq "APPROVED" -and $gApproveRes.approvedBy -eq "GUARDIAN") {
-        $results["7_GuardianApproval"] = "PASSED - Guardian escalated request approved (ApprovedBy: GUARDIAN, AccessGranted: $($gApproveRes.accessGranted))"
-        Write-Host "[PASS] 7. Guardian Approval: PASSED"
+    if ($chainValid -and ($overallIntegrity -eq "VERIFIED") -and ($victimName -eq "Test Victim $rand") -and ($itemsCount -eq 2)) {
+        $results["8_AuthorityDecryptVerified"] = "PASSED - Decrypted 2 items | Integrity: VERIFIED | ChainValid: true | Victim: '$victimName'"
+        Write-Host "[PASS] 8. Authority Decrypts: PASSED (Overall: VERIFIED, ChainValid: true, Victim: $victimName)" -ForegroundColor Green
     } else {
-        $results["7_GuardianApproval"] = "FAILED - Status=$($gApproveRes.status)"
-        Write-Host "[FAIL] 7. Guardian Approval: FAILED"
+        throw "Verification mismatch: Overall=$overallIntegrity, ChainValid=$chainValid, Name=$victimName"
     }
 } catch {
-    $results["7_GuardianApproval"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 7. Guardian Approval: FAILED - $($_.Exception.Message)"
+    $results["8_AuthorityDecryptVerified"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 8. Authority Decrypts: FAILED - $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# ---------------------------------------------------------------
-# Step 8: Decrypt and Verify as Authority (before tamper)
-# ---------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# 9. Simulate tampering and see TAMPERED
+# ------------------------------------------------------------------------------
 try {
-    $evidenceRes = Invoke-RestMethod -Uri "$baseUrl/authority/cases/$victimCaseId/evidence" -Method Get -Headers @{ "Authorization" = "Bearer $authorityToken" }
-    $chainValid = $evidenceRes.chainValid
-    $victimName = $evidenceRes.victimName
-    $victimPhone = $evidenceRes.victimPhone
-    $overallIntegrity = $evidenceRes.overallIntegrity
-    $itemsCount = $evidenceRes.items.Count
-
-    if ($chainValid -and ($overallIntegrity -eq "VERIFIED") -and ($victimName -eq "Priya Sharma")) {
-        $results["8_DecryptAndVerify"] = "PASSED - Chain Valid: $chainValid, Overall: $overallIntegrity, Decrypted Victim: '$victimName' ($victimPhone), Items: $itemsCount"
-        Write-Host "[PASS] 8. Decrypt and Verify: PASSED"
-    } else {
-        $results["8_DecryptAndVerify"] = "FAILED - ChainValid: $chainValid, Overall: $overallIntegrity, Name: $victimName"
-        Write-Host "[FAIL] 8. Decrypt and Verify: FAILED"
+    # Corrupt item 2
+    $tamperRes = Invoke-RestMethod -Uri "$baseUrl/dev/tamper/$evidenceId2" -Method Post -Body "{}" -Headers @{ "Authorization" = "Bearer $victimToken" } -ContentType "application/json"
+    if (-not $tamperRes.success) {
+        throw "Tamper simulation endpoint failed: $($tamperRes.error)"
     }
-} catch {
-    $results["8_DecryptAndVerify"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 8. Decrypt and Verify: FAILED - $($_.Exception.Message)"
-}
+    Write-Host "[PASS] 9a. Tamper Simulation Applied to Item #${evidenceId2}: PASSED" -ForegroundColor Green
 
-# ---------------------------------------------------------------
-# Step 9: Tamper Simulation and Tamper Detection
-# ---------------------------------------------------------------
-try {
-    $evidenceToTamper = $audioRes.evidenceId
-    $tamperRes = Invoke-RestMethod -Uri "$baseUrl/dev/tamper/$evidenceToTamper" -Method Post -Body "{}" -Headers @{ "Authorization" = "Bearer $victimToken" } -ContentType "application/json"
-    
-    # Re-inspect victim1 case as authority to test tamper detection
-    $tamperInspectRes = Invoke-RestMethod -Uri "$baseUrl/authority/cases/$victimCaseId/evidence" -Method Get -Headers @{ "Authorization" = "Bearer $authorityToken" }
-    $tamperDetected = (-not $tamperInspectRes.chainValid) -and ($tamperInspectRes.overallIntegrity -eq "TAMPERED")
-    $brokenSeq = $tamperInspectRes.firstBrokenIndex + 1
+    # Re-verify as Authority
+    $tamperInspect = Invoke-RestMethod -Uri "$baseUrl/authority/cases/$caseId/evidence" -Method Get -Headers @{ "Authorization" = "Bearer $authorityToken" }
+    $tamperDetected = (-not $tamperInspect.chainValid) -and ($tamperInspect.overallIntegrity -eq "TAMPERED")
 
     if ($tamperDetected) {
-        $results["9_TamperDetection"] = "PASSED - OverallIntegrity: TAMPERED, ChainValid: false, Broken block identified: sequence #$brokenSeq"
-        Write-Host "[PASS] 9. Tamper Detection: PASSED (Detected at item sequence #$brokenSeq)"
+        $brokenIndex = $tamperInspect.firstBrokenIndex
+        $results["9_TamperDetectionTampered"] = "PASSED - Tampering Detected! OverallIntegrity: TAMPERED | ChainValid: false | Broken Item Index: $brokenIndex"
+        Write-Host "[PASS] 9b. Authority Verification Detects Tamper: PASSED (Overall: TAMPERED, ChainValid: false, Broken Index: $brokenIndex)" -ForegroundColor Green
     } else {
-        $results["9_TamperDetection"] = "FAILED - Tamper not detected by verification engine"
-        Write-Host "[FAIL] 9. Tamper Detection: FAILED"
+        throw "Verification engine failed to flag tampering. Overall=$($tamperInspect.overallIntegrity)"
     }
 } catch {
-    $results["9_TamperDetection"] = "FAILED - $($_.Exception.Message)"
-    Write-Host "[FAIL] 9. Tamper Detection: FAILED - $($_.Exception.Message)"
+    $results["9_TamperDetectionTampered"] = "FAILED - $($_.Exception.Message)"
+    Write-Host "[FAIL] 9. Simulate Tampering: FAILED - $($_.Exception.Message)" -ForegroundColor Red
 }
 
+# ------------------------------------------------------------------------------
+# Summary Output
+# ------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "===================================================="
-Write-Host "Summary of Flow Execution:"
-Write-Host "===================================================="
+Write-Host "=================================================================="
+Write-Host "FULL FLOW EXECUTION SUMMARY (BRAND-NEW ACCOUNTS):"
+Write-Host "=================================================================="
 $results.GetEnumerator() | ForEach-Object {
     Write-Host "$($_.Key): $($_.Value)"
 }
-Write-Host "===================================================="
+Write-Host "=================================================================="

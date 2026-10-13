@@ -32,6 +32,16 @@ public class DataSourceConfig {
         String username = defaultUsername;
         String password = defaultPassword;
 
+        if (System.getenv("DB_PASS") != null && !System.getenv("DB_PASS").isBlank()) {
+            password = System.getenv("DB_PASS");
+        }
+        if (System.getenv("DB_USER") != null && !System.getenv("DB_USER").isBlank()) {
+            username = System.getenv("DB_USER");
+        }
+        if (System.getenv("DB_URL") != null && !System.getenv("DB_URL").isBlank()) {
+            dbUrl = System.getenv("DB_URL");
+        }
+
         // Auto-detect cloud environment variables (MYSQL_URL, DATABASE_URL)
         String envUrl = System.getenv("MYSQL_URL");
         if (envUrl == null || envUrl.isBlank()) {

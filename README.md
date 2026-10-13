@@ -161,49 +161,78 @@ Configuration is loaded from `.env` in the project root (see `.env.example`):
 | `DB_USER` | MySQL database username | `root` |
 | `DB_PASS` | MySQL database password | `demo123` *(set in local .env)* |
 | `JWT_SECRET` | 256-bit hex signing key for HMAC-SHA256 | `4f7b2c9e8d1a5f0e3c6a9b2d5f8e1c4b7a0d3f6e9c2b5a8d1e4f7a0c3b6e9d28` |
+| `AUTHORITY_ACCESS_CODE` | Secret authorization code required to register an Authority account | `AUTH-2026` |
 | `DATA_DIR` | Storage path for authority RSA keys & stego images | `./data` |
 | `SPRING_PROFILES_ACTIVE` | Active Spring profile (`dev` enables tamper endpoint) | `dev` |
 
 ---
 
-## 👥 Demo Accounts & Secret Portal Unlock
+## 🔐 Real Role-Based Registration & Authentication
 
-| Role | Username | Password | Purpose & Capabilities |
-|---|---|---|---|
-| **Victim** | `victim1` | `demo123` | Uploads text/image/audio evidence, views case hash chain, approves/rejects access, toggles availability |
-| **Authority** | `authority1` | `demo123` | Reviews severity-sorted cases with masked identities, submits access requests, inspects decrypted evidence & chain audit |
-| **Guardian** | `guardian1` | `demo123` | Reviews ward's pending requests, authorizes emergency access when victim is unavailable |
+ShadowVault enforces production-grade authentication with BCrypt password hashing (minimum length of 8 characters) and role-segregated onboarding:
 
-> **Secret Portal Unlock:**  
-> On the decoy blog homepage (`http://localhost:8080/#/`), type **`shadow123`** into the search bar. The interface transitions immediately into the high-security ShadowVault portal.
+### 1. Victim Registration
+- **Fields:** Full Name, Phone Number, Email, Username, Password (min 8 chars), optional Guardian Name & Phone.
+- **Workflow:**
+  1. Victim fills out the registration form.
+  2. Identity details are client-side validated and AES-256 encrypted.
+  3. A simulated 6-digit SMS OTP is issued for account verification.
+  4. A **One-Time Guardian Invite Code** (format: `GRD-XXXXXX`) is generated and securely stored on the victim's record.
+  5. The victim shares this invite code with their trusted guardian.
+
+### 2. Guardian Registration & Linking
+- **Fields:** Full Name, Phone Number, Email, Username, Password (min 8 chars), and the victim's **Guardian Invite Code**.
+- **Workflow:**
+  1. Guardian inputs their details along with the ward's `GRD-XXXXXX` invite code.
+  2. The server validates the code and rejects invalid/unregistered codes.
+  3. On success, the guardian is cryptographically linked to the victim in the database.
+  4. Guardians can view and approve access requests *only* for wards linked to them by invite code (when the victim is marked unavailable or the request has been pending over 2 minutes).
+
+### 3. Authority Registration
+- **Fields:** Full Name, Department (e.g. *Cyber Crime Investigation Cell*), Email, Username, Password (min 8 chars), and the **Authority Access Code**.
+- **Workflow:**
+  1. Law enforcement personnel enter their official credentials and the agency authorization code.
+  2. The code is validated against the configured access code:
+     - **Default Code:** **`AUTH-2026`**
+     - **Configurable via:** `AUTHORITY_ACCESS_CODE` environment variable or `shadowvault.authority.access-code` property.
+  3. Wrong codes are immediately rejected with an authorization error.
+
+> **Note on Demo Fallbacks:**  
+> Seeded demo accounts (`victim1`, `authority1`, `guardian1` with password `demo123`) remain in the database strictly as a hidden fallback for automated tests. The login UI contains zero demo buttons or hardcoded credentials.
+
+---
+
+## 🗝️ Secret Portal Unlock
+
+On the decoy lifestyle blog homepage (`http://localhost:8080/#/`), type **`shadow123`** into the search bar. The interface transitions immediately into the secure ShadowVault application portal.
 
 ---
 
 ## 🧪 Testing & Verification
 
 ### 1. Maven Unit & Flow Integration Tests
-Run all 27 tests (including encryption, hash chain, dynamic severity, steganography, and full MockMvc flow):
+Run all 28 automated tests (including encryption, hash chain, dynamic severity, steganography, role registration, validation rejections, and unlinked guardian escalation checks):
 ```bash
 cd backend
 mvn clean test
 ```
 *Note: Testcontainers integration tests run automatically in CI or on machines with active Docker daemons, and skip gracefully when Docker is absent via `@Testcontainers(disabledWithoutDocker = true)`.*
 
-### 2. End-to-End PowerShell Integration Test Suite
-To test all 9 live stages against a clean MySQL database:
+### 2. End-to-End PowerShell Integration Test Suite (Brand-New Accounts)
+To execute the complete end-to-end lifecycle from scratch with brand-new accounts against MySQL 8:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\test_full_flow.ps1
 ```
 Tests executed:
-1. `1_Register`: New victim registration with simulated OTP
-2. `2_VictimLogin`: JWT issuance and authentication
-3. `3_UploadEvidence`: TEXT, IMAGE, and AUDIO evidence ingestion with dynamic severity scoring
-4. `4_AuthorityQueue`: Masked queue listing
-5. `5_AuthorityRequest`: Formal investigation access request
-6. `6_VictimApproval`: Victim consent grant
-7. `7_GuardianApproval`: Emergency guardian escalation fallback
-8. `8_DecryptAndVerify`: Decryption of evidence & SHA-256 chain verification (`VERIFIED`)
-9. `9_TamperDetection`: Deliberate byte corruption and instant compromise identification (`TAMPERED`)
+1. `1_RegisterVictim`: Registers brand-new victim, generates simulated OTP & Guardian Invite Code (`GRD-XXXXXX`)
+2. `2_RegisterGuardian`: Registers brand-new guardian linked to the victim using the invite code
+3. `3_RegisterAuthority`: Registers brand-new authority using the access code `AUTH-2026`
+4. `4_UploadTwoItems`: Uploads Text statement and Image evidence into an unbroken SHA-256 hash chain
+5. `5_AuthorityRequestAccess`: Authority files official access request (status: PENDING)
+6. `6_VictimMarksUnavailable`: Victim marks self UNAVAILABLE to activate guardian escalation
+7. `7_GuardianApproves`: Linked guardian verifies ward request and approves emergency access
+8. `8_AuthorityDecryptVerified`: Authority decrypts evidence and verifies chain integrity (`VERIFIED`)
+9. `9_TamperDetectionTampered`: Injects cryptographic tampering via dev endpoint and verifies detection (`TAMPERED`)
 
 ---
 
